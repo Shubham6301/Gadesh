@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Code, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { API_URL } from '../config/api';
 import { showError, showSuccess } from '../utils/toast';
+import { useAuth } from '../contexts/AuthContext'; // ✅ ADDED
 
 // Animated stars + bubbles background for dark mode
 const StarField: React.FC = () => {
@@ -237,6 +238,8 @@ const RainbowSunlight: React.FC = () => {
 };
 
 const Register: React.FC = () => {
+  const { register } = useAuth(); // ✅ ADDED — gives auto sign-in after account creation
+
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -266,60 +269,28 @@ const Register: React.FC = () => {
     e.preventDefault();
     setError('');
 
-    // console.log('📝 Starting registration process...');
-    // console.log('📊 Form data:', { username, email, password: '[HIDDEN]' });
-
     if (password !== confirmPassword) {
-      // console.log('❌ Password mismatch');
       setError('Passwords do not match');
       return;
     }
 
     setLoading(true);
-    console.log('🔄 Setting loading state to true');
 
     try {
-      console.log('🌐 Making API request to register...');
-      console.log('📍 API URL:', API_URL);
+      // ✅ CHANGED: use AuthContext register() instead of raw fetch
+      //    This saves token + user to state → user is logged in instantly
+      await register(username, email, password);
 
-      const response = await fetch(`${API_URL}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username,
-          email,
-          password,
-          role: 'user'
-        }),
-      });
+      showSuccess('Account created successfully!');
 
-      console.log('📡 Response received:', response.status, response.statusText);
+      // ✅ CHANGED: redirect to home directly — no need to visit /login
+      window.location.href = '/';
 
-      const data = await response.json();
-      console.log('📋 Response data:', data);
-
-      if (response.ok) {
-        console.log('✅ Registration successful!');
-        // Store token in localStorage
-        if (data.token) {
-          localStorage.setItem('token', data.token);
-          console.log('🔐 Token stored in localStorage');
-        }
-        alert('Account created successfully! You can now login.');
-        // Optionally redirect to login or dashboard
-        // window.location.href = '/login';
-      } else {
-        console.log('❌ Registration failed:', data.message);
-        setError(data.message || 'Registration failed');
-      }
-    } catch (error) {
-      console.error('❌ Network error during registration:', error);
-      setError('Network error. Please check your connection and try again.');
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Registration failed';
+      setError(msg);
     } finally {
       setLoading(false);
-      console.log('🔄 Setting loading state to false');
     }
   };
 
