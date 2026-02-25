@@ -1485,7 +1485,9 @@ const updateData = {
         {/* Notification */}
         {notification && (
           <div
-            className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg ${
+           style={{ position: 'fixed', top: '80px', right: '16px', zIndex: 999999 }}
+    className={`p-4 rounded-lg shadow-2xl border-2 ${
+
               notification.type === "success"
                 ? "bg-green-100 text-green-800 border border-green-200"
                 : notification.type === "error"
