@@ -100,7 +100,7 @@ const Navbar: React.FC = () => {
           {/* Desktop Navigation */}
           <div className="hidden lg:flex items-center space-x-8">
             {/* Creators - sirf !user, Problems se pehle, same styling */}
-            {!user && (
+            {/* {!user && (
               <a
                 href="https://project-about-page-gray.vercel.app/"
                 target="_blank"
@@ -113,7 +113,7 @@ const Navbar: React.FC = () => {
               >
                 Creator's
               </a>
-            )}
+            )} */}
 
             {navItems.map((item) => {
               const active = isActive(item.path);
@@ -402,7 +402,7 @@ const Navbar: React.FC = () => {
               {/* Navigation Items */}
               <div className="px-6 py-4 space-y-2">
                 {/* Creators - Mobile (sirf !user, Problems se pehle) */}
-                {!user && (
+                {/* {!user && (
                   <a
                     href="https://project-about-page-gray.vercel.app/"
                     target="_blank"
@@ -415,7 +415,7 @@ const Navbar: React.FC = () => {
                   >
                     Creator's
                   </a>
-                )}
+                )} */}
 
                 {navItems.map((item) => {
                   const active = isActive(item.path);
