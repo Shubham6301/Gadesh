@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { ShoppingCart, Coins, Gift, Truck, MapPin, Phone, User, CheckCircle, Star } from 'lucide-react';
+import { ShoppingCart, Coins, Gift, Truck, MapPin, Phone, User, CheckCircle, Star, Package, Clock, XCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { API_URL, SOCKET_URL } from "../config/api";
 
 interface RedeemItem {
@@ -30,6 +30,30 @@ interface RedeemOrder {
   };
 }
 
+interface MyOrder {
+  _id: string;
+  itemId: {
+    _id: string;
+    name: string;
+    imageUrl: string;
+    coinsCost: number;
+    description: string;
+  };
+  quantity: number;
+  totalCost: number;
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  deliveryAddress: {
+    fullName: string;
+    phone: string;
+    address: string;
+    city: string;
+    state: string;
+    pincode: string;
+  };
+  orderDate: string;
+  trackingNumber?: string;
+}
+
 const Redeem: React.FC = () => {
   const { user, token, updateCoins } = useAuth();
   const { isDark } = useTheme();
@@ -41,6 +65,10 @@ const Redeem: React.FC = () => {
   const [quantity, setQuantity] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState('all');
+  const [activeTab, setActiveTab] = useState<'store' | 'myorders'>('store');
+  const [myOrders, setMyOrders] = useState<MyOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [deliveryAddress, setDeliveryAddress] = useState({
     fullName: '',
     phone: '',
@@ -58,7 +86,22 @@ const Redeem: React.FC = () => {
       return;
     }
     fetchRedeemItems();
+    fetchMyOrders();
   }, [user, token, navigate]);
+
+  const fetchMyOrders = async () => {
+    setOrdersLoading(true);
+    try {
+      const response = await axios.get(`${API_URL}/redeem/orders`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setMyOrders(response.data.orders || []);
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
 
   const fetchRedeemItems = async () => {
     try {
@@ -232,6 +275,9 @@ const Redeem: React.FC = () => {
       // Update user coins
       const newCoinBalance = (user.coins || 0) - totalCost;
       updateCoins(newCoinBalance);
+
+      // Refresh my orders list
+      fetchMyOrders();
 
       alert(`🎉 Redemption successful! ${totalCost} coins deducted. Your order will be delivered to your address.`);
       
@@ -619,6 +665,227 @@ const Redeem: React.FC = () => {
           </div>
         </div>
 
+        {/* Tab Switcher */}
+        <div className="flex space-x-2 mb-8">
+          <button
+            onClick={() => setActiveTab('store')}
+            className={`flex items-center px-6 py-2.5 rounded-full font-medium text-sm transition-all duration-200 ${
+              activeTab === 'store'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            <Gift className="h-4 w-4 mr-2" />
+            Redemption Store
+          </button>
+          <button
+            onClick={() => setActiveTab('myorders')}
+            className={`flex items-center px-6 py-2.5 rounded-full font-medium text-sm transition-all duration-200 ${
+              activeTab === 'myorders'
+                ? 'bg-blue-600 text-white shadow-md'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+            }`}
+          >
+            <Package className="h-4 w-4 mr-2" />
+            My Orders
+            {myOrders.length > 0 && (
+              <span className={`ml-2 px-2 py-0.5 rounded-full text-xs font-bold ${
+                activeTab === 'myorders' ? 'bg-white text-blue-600' : 'bg-blue-600 text-white'
+              }`}>
+                {myOrders.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* My Orders Tab */}
+        {activeTab === 'myorders' && (
+          <div>
+            {ordersLoading ? (
+              <div className="flex items-center justify-center py-16">
+                <div className="animate-spin rounded-full h-10 w-10 border-4 border-blue-600 border-t-transparent"></div>
+              </div>
+            ) : myOrders.length === 0 ? (
+              <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                <Package className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">No orders yet</h3>
+                <p className="text-gray-500 dark:text-gray-400 mb-4">Go to the store and redeem something awesome!</p>
+                <button
+                  onClick={() => setActiveTab('store')}
+                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-sm font-medium transition-colors"
+                >
+                  Browse Store
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {myOrders.map((order) => {
+                  const steps = [
+                    { key: 'pending', label: 'Order Placed', icon: '📦', desc: 'Your order has been received' },
+                    { key: 'processing', label: 'Processing', icon: '⚙️', desc: 'We are preparing your order' },
+                    { key: 'shipped', label: 'Shipped', icon: '🚚', desc: 'Order is on its way to you' },
+                    { key: 'delivered', label: 'Delivered', icon: '✅', desc: 'Order delivered successfully' },
+                  ];
+                  const statusOrder = ['pending', 'processing', 'shipped', 'delivered'];
+                  const currentIdx = order.status === 'cancelled' ? -1 : statusOrder.indexOf(order.status);
+                  const isExpanded = expandedOrder === order._id;
+
+                  return (
+                    <div
+                      key={order._id}
+                      className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
+                    >
+                      {/* Order Header */}
+                      <div
+                        className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                        onClick={() => setExpandedOrder(isExpanded ? null : order._id)}
+                      >
+                        <div className="flex items-center space-x-4">
+                          {order.itemId?.imageUrl && (
+                            <img
+                              src={order.itemId.imageUrl}
+                              alt={order.itemId?.name}
+                              className="w-14 h-14 object-cover rounded-lg border border-gray-200 dark:border-gray-600"
+                            />
+                          )}
+                          <div>
+                            <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+                              {order.itemId?.name || 'Item'}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                              Qty: {order.quantity} &bull; 🪙 {order.totalCost} coins
+                            </p>
+                            <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                              Ordered: {new Date(order.orderDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-3">
+                          {order.status === 'cancelled' ? (
+                            <span className="flex items-center px-3 py-1.5 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full text-xs font-semibold">
+                              <XCircle className="h-3.5 w-3.5 mr-1" />
+                              Cancelled
+                            </span>
+                          ) : (
+                            <span className={`flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${
+                              order.status === 'delivered'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                                : order.status === 'shipped'
+                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                                : order.status === 'processing'
+                                ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300'
+                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                            }`}>
+                              {order.status === 'delivered' && <CheckCircle className="h-3.5 w-3.5 mr-1" />}
+                              {order.status === 'shipped' && <Truck className="h-3.5 w-3.5 mr-1" />}
+                              {order.status === 'processing' && <Clock className="h-3.5 w-3.5 mr-1" />}
+                              {order.status === 'pending' && <Package className="h-3.5 w-3.5 mr-1" />}
+                              {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                            </span>
+                          )}
+                          {isExpanded
+                            ? <ChevronUp className="h-4 w-4 text-gray-400" />
+                            : <ChevronDown className="h-4 w-4 text-gray-400" />
+                          }
+                        </div>
+                      </div>
+
+                      {/* Expanded Details */}
+                      {isExpanded && (
+                        <div className="border-t border-gray-100 dark:border-gray-700 p-5 space-y-5">
+
+                          {/* Progress Tracker */}
+                          {order.status !== 'cancelled' && (
+                            <div>
+                              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Order Progress</p>
+                              <div className="relative">
+                                {/* Progress line */}
+                                <div className="absolute top-5 left-5 right-5 h-0.5 bg-gray-200 dark:bg-gray-700 z-0">
+                                  <div
+                                    className="h-full bg-blue-500 transition-all duration-500"
+                                    style={{ width: `${currentIdx === 0 ? 0 : currentIdx >= 3 ? 100 : (currentIdx / 3) * 100}%` }}
+                                  />
+                                </div>
+                                <div className="relative z-10 flex justify-between">
+                                  {steps.map((step, idx) => {
+                                    const isDone = idx <= currentIdx;
+                                    const isActive = idx === currentIdx;
+                                    return (
+                                      <div key={step.key} className="flex flex-col items-center w-1/4">
+                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-2 transition-all duration-300 ${
+                                          isDone
+                                            ? 'bg-blue-600 border-blue-600 shadow-md'
+                                            : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
+                                        } ${isActive ? 'ring-4 ring-blue-200 dark:ring-blue-900' : ''}`}>
+                                          <span className={isDone ? 'grayscale-0' : 'grayscale opacity-40'}>
+                                            {step.icon}
+                                          </span>
+                                        </div>
+                                        <p className={`mt-2 text-xs font-medium text-center ${
+                                          isDone ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-600'
+                                        }`}>
+                                          {step.label}
+                                        </p>
+                                        {isActive && (
+                                          <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-0.5 max-w-[80px]">
+                                            {step.desc}
+                                          </p>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {order.status === 'cancelled' && (
+                            <div className="flex items-center p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                              <XCircle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0" />
+                              <p className="text-sm text-red-700 dark:text-red-300">
+                                This order has been cancelled. Coins have been refunded.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* Tracking Number */}
+                          {order.trackingNumber && (
+                            <div className="flex items-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                              <Truck className="h-5 w-5 text-blue-500 mr-2 flex-shrink-0" />
+                              <div>
+                                <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Tracking Number</p>
+                                <p className="text-sm font-bold text-blue-900 dark:text-blue-100">{order.trackingNumber}</p>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Delivery Address */}
+                          <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                            <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2 flex items-center">
+                              <MapPin className="h-3.5 w-3.5 mr-1" />
+                              Delivery Address
+                            </p>
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{order.deliveryAddress?.fullName}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{order.deliveryAddress?.phone}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {order.deliveryAddress?.address}, {order.deliveryAddress?.city}, {order.deliveryAddress?.state} - {order.deliveryAddress?.pincode}
+                            </p>
+                          </div>
+
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Store Tab Content */}
+        {activeTab === 'store' && (
+          <>
         {/* Category Filter */}
         <div className="mb-8">
           <div className="flex flex-wrap gap-3">
@@ -704,6 +971,8 @@ const Redeem: React.FC = () => {
             <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2">No items found</h3>
             <p className="text-gray-600 dark:text-gray-400">Try selecting a different category</p>
           </div>
+        )}
+          </>
         )}
       </div>
 
