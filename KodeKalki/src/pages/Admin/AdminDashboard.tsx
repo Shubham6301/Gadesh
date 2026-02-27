@@ -34,6 +34,8 @@ import {
   HelpCircle,
   BookOpen,
   FileText,
+  Truck,
+  MapPin,
 } from "lucide-react";
 
 interface MCQQuestion {
@@ -78,6 +80,25 @@ interface RedeemOrder {
   totalCoinCost: number;
   status: string;
   createdAt: string;
+}
+
+interface RedeemOrderAdmin {
+  _id: string;
+  userId: { _id: string; username: string; email: string };
+  itemId: { _id: string; name: string; imageUrl: string; coinsCost: number };
+  quantity: number;
+  totalCost: number;
+  status: 'pending' | 'processing' | 'shipped' | 'delivered' | 'cancelled';
+  deliveryAddress: {
+    fullName: string;
+    phone: string;
+    address: string;
+    city: string;
+    state: string;
+    pincode: string;
+  };
+  orderDate: string;
+  trackingNumber?: string;
 }
 
 interface ChatRoom {
@@ -177,6 +198,10 @@ const AdminDashboard: React.FC = () => {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [mcqQuestions, setMcqQuestions] = useState<MCQQuestion[]>([]);
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
+  const [redeemOrders, setRedeemOrders] = useState<RedeemOrderAdmin[]>([]);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [editOrderStatus, setEditOrderStatus] = useState('');
+  const [editTrackingNumber, setEditTrackingNumber] = useState('');
   const [loading, setLoading] = useState(true);
   const [showCreateProblem, setShowCreateProblem] = useState(false);
   const [editingProblemId, setEditingProblemId] = useState<string | null>(null);
@@ -410,6 +435,7 @@ const fetchData = async () => {
         usersRes,
         mcqRes,
         chatRoomsRes,
+        redeemOrdersRes,
       ] = await Promise.all([
         axios.get(`${API_URL}/problems/admin/all`, { headers }),
         axios.get(`${API_URL}/contests`, { headers }),
@@ -420,6 +446,9 @@ const fetchData = async () => {
         axios
           .get(`${API_URL}/chats/rooms`, { headers })
           .catch(() => ({ data: [] })),
+        axios
+          .get(`${API_URL}/redeem/admin/orders`, { headers })
+          .catch(() => ({ data: { orders: [] } })),
       ]);
 
       // Remove duplicates by creating a Map with _id as key
@@ -440,10 +469,46 @@ const fetchData = async () => {
       setUsers(uniqueUsers);
       setMcqQuestions(mcqRes.data.questions || []);
       setChatRooms(chatRoomsRes.data || []);
+      setRedeemOrders(redeemOrdersRes.data.orders || []);
     } catch (error: any) {
       console.error("❌ [AdminDashboard] Error fetching admin data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleUpdateOrderStatus = async (orderId: string) => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.put(
+        `${API_URL}/redeem/admin/orders/${orderId}`,
+        {
+          status: editOrderStatus,
+          ...(editTrackingNumber && { trackingNumber: editTrackingNumber }),
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      setRedeemOrders(redeemOrders.map(order =>
+        order._id === orderId
+          ? {
+              ...order,
+              status: editOrderStatus as RedeemOrderAdmin['status'],
+              trackingNumber: editTrackingNumber || order.trackingNumber,
+            }
+          : order
+      ));
+      setEditingOrderId(null);
+      setEditOrderStatus('');
+      setEditTrackingNumber('');
+      showNotification('success', 'Order status updated successfully!');
+    } catch (error: any) {
+      showNotification('error', `Failed to update order: ${error.response?.data?.error || error.message}`);
     }
   };
 
@@ -1156,8 +1221,16 @@ const updateData = {
       label: "Add Document",
       icon: <Plus className="h-4 w-4" />,
     },  
-      { id: "help", label: "Help Articles", icon: <FileText className="h-4 w-4" /> },  // ✅ ADD THIS LINE
-
+      {
+      id: "help",
+      label: "Help Articles",
+      icon: <FileText className="h-4 w-4" />,
+    },
+    {
+      id: "redeem-orders",
+      label: "Redeem Orders",
+      icon: <ShoppingCart className="h-4 w-4" />,
+    },
   ];
 
   if (loading) {
@@ -1481,7 +1554,7 @@ const updateData = {
           </div>
         </>
       )}
-      <div className="relative z-10">
+     <div className="relative z-10">
         {/* Notification */}
         {notification && (
           <div
@@ -1536,19 +1609,19 @@ const updateData = {
           {/* Tabs */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="border-b border-gray-200">
-              <nav className="flex space-x-8 px-6">
+              <nav className="flex space-x-1 px-4 overflow-x-auto scrollbar-hide">
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
+                    className={`flex items-center py-3 px-3 border-b-2 font-medium text-xs whitespace-nowrap transition-colors flex-shrink-0 ${
                       activeTab === tab.id
                         ? "border-blue-500 text-blue-600"
                         : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     }`}
                   >
                     {tab.icon}
-                    <span className="ml-2">{tab.label}</span>
+                    <span className="ml-1.5">{tab.label}</span>
                   </button>
                 ))}
               </nav>
@@ -4638,6 +4711,248 @@ const updateData = {
 
               {/* Add Documents Tab */}
               {activeTab === "add-document" && <AddDocumentTab />}
+
+              {/* Redeem Orders Tab */}
+              {activeTab === "redeem-orders" && (
+                <div>
+                  {/* Header with stats */}
+                  <div className="flex items-center justify-between mb-6">
+                    <h3 className="text-lg font-semibold flex items-center">
+                      <ShoppingCart className="mr-2 h-6 w-6 text-orange-600" />
+                      Redeem Orders ({redeemOrders.length})
+                    </h3>
+                    <div className="flex gap-2 text-xs">
+                      {(['pending','processing','shipped','delivered','cancelled'] as const).map(s => {
+                        const count = redeemOrders.filter(o => o.status === s).length;
+                        if (!count) return null;
+                        return (
+                          <span key={s} className={`px-2 py-1 rounded-full font-medium ${
+                            s === 'delivered' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                            s === 'shipped'   ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' :
+                            s === 'processing'? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                            s === 'cancelled' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' :
+                                                'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                          }`}>
+                            {s}: {count}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {redeemOrders.length === 0 ? (
+                    <div className="text-center py-16 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
+                      <ShoppingCart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+                      <p className="text-lg font-medium text-gray-500">No redeem orders found.</p>
+                      <p className="text-sm text-gray-400">Orders will appear here once users redeem items.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {redeemOrders.map(order => {
+                        const steps = [
+                          { key: 'pending',    label: 'Order Placed', icon: '📦', desc: 'Order received' },
+                          { key: 'processing', label: 'Processing',   icon: '⚙️', desc: 'Preparing order' },
+                          { key: 'shipped',    label: 'Shipped',      icon: '🚚', desc: 'On the way' },
+                          { key: 'delivered',  label: 'Delivered',    icon: '✅', desc: 'Delivered!' },
+                        ];
+                        const statusOrder = ['pending', 'processing', 'shipped', 'delivered'];
+                        const currentIdx = order.status === 'cancelled' ? -1 : statusOrder.indexOf(order.status);
+                        const isExpanded = editingOrderId === order._id;
+
+                        return (
+                          <div
+                            key={order._id}
+                            className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
+                          >
+                            {/* Card Header — click to expand */}
+                            <div
+                              className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                              onClick={() => {
+                                if (isExpanded) {
+                                  setEditingOrderId(null);
+                                  setEditOrderStatus('');
+                                  setEditTrackingNumber('');
+                                } else {
+                                  setEditingOrderId(order._id);
+                                  setEditOrderStatus(order.status);
+                                  setEditTrackingNumber(order.trackingNumber || '');
+                                }
+                              }}
+                            >
+                              <div className="flex items-center space-x-4">
+                                {order.itemId?.imageUrl && (
+                                  <img
+                                    src={order.itemId.imageUrl}
+                                    alt={order.itemId?.name}
+                                    className="w-14 h-14 object-cover rounded-lg border border-gray-200 dark:border-gray-600 flex-shrink-0"
+                                  />
+                                )}
+                                <div>
+                                  <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
+                                    {order.itemId?.name || 'Item'}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                    👤 {order.userId?.username || 'N/A'} &bull; {order.userId?.email || ''}
+                                  </p>
+                                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                                    Qty: {order.quantity} &bull; 🪙 {order.totalCost} coins &bull; {new Date(order.orderDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center space-x-3 flex-shrink-0">
+                                <span className={`flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${
+                                  order.status === 'delivered'  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
+                                  order.status === 'shipped'    ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
+                                  order.status === 'processing' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300' :
+                                  order.status === 'cancelled'  ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+                                                                  'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                }`}>
+                                  {order.status === 'pending'    && '🕐 '}
+                                  {order.status === 'processing' && '⚙️ '}
+                                  {order.status === 'shipped'    && '🚚 '}
+                                  {order.status === 'delivered'  && '✅ '}
+                                  {order.status === 'cancelled'  && '❌ '}
+                                  {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                                </span>
+                                {isExpanded
+                                  ? <ChevronUp className="h-4 w-4 text-gray-400" />
+                                  : <ChevronDown className="h-4 w-4 text-gray-400" />
+                                }
+                              </div>
+                            </div>
+
+                            {/* Expanded — Progress + Edit + Details */}
+                            {isExpanded && (
+                              <div className="border-t border-gray-100 dark:border-gray-700 p-5 space-y-5">
+
+                                {/* Progress Tracker */}
+                                {order.status !== 'cancelled' && (
+                                  <div>
+                                    <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Order Progress</p>
+                                    <div className="relative">
+                                      <div className="absolute top-5 left-5 right-5 h-0.5 bg-gray-200 dark:bg-gray-700 z-0">
+                                        <div
+                                          className="h-full bg-blue-500 transition-all duration-500"
+                                          style={{ width: `${currentIdx <= 0 ? 0 : currentIdx >= 3 ? 100 : (currentIdx / 3) * 100}%` }}
+                                        />
+                                      </div>
+                                      <div className="relative z-10 flex justify-between">
+                                        {steps.map((step, idx) => {
+                                          const isDone   = idx <= currentIdx;
+                                          const isActive = idx === currentIdx;
+                                          return (
+                                            <div key={step.key} className="flex flex-col items-center w-1/4">
+                                              <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-2 transition-all duration-300 ${
+                                                isDone
+                                                  ? 'bg-blue-600 border-blue-600 shadow-md'
+                                                  : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
+                                              } ${isActive ? 'ring-4 ring-blue-200 dark:ring-blue-900' : ''}`}>
+                                                <span className={isDone ? '' : 'grayscale opacity-40'}>{step.icon}</span>
+                                              </div>
+                                              <p className={`mt-2 text-xs font-medium text-center ${isDone ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-600'}`}>
+                                                {step.label}
+                                              </p>
+                                              {isActive && (
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-0.5 max-w-[80px]">{step.desc}</p>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Admin Edit Section */}
+                                <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+                                  <p className="text-sm font-semibold text-orange-700 dark:text-orange-400 mb-3 flex items-center">
+                                    <Edit className="h-4 w-4 mr-1.5" />
+                                    Admin — Update Order
+                                  </p>
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    <div>
+                                      <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
+                                        Order Status
+                                      </label>
+                                      <select
+                                        value={editOrderStatus}
+                                        onChange={(e) => setEditOrderStatus(e.target.value)}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <option value="pending">🕐 Pending</option>
+                                        <option value="processing">⚙️ Processing</option>
+                                        <option value="shipped">🚚 Shipped / On the Way</option>
+                                        <option value="delivered">✅ Delivered</option>
+                                        <option value="cancelled">❌ Cancelled</option>
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
+                                        Tracking Number (optional)
+                                      </label>
+                                      <input
+                                        type="text"
+                                        value={editTrackingNumber}
+                                        onChange={(e) => setEditTrackingNumber(e.target.value)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
+                                        placeholder="e.g., IND123456789IN"
+                                      />
+                                    </div>
+                                  </div>
+                                  <div className="flex space-x-2 mt-3">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); handleUpdateOrderStatus(order._id); }}
+                                      className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
+                                    >
+                                      <Save className="h-3.5 w-3.5 mr-1.5" />
+                                      Save Changes
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setEditingOrderId(null); setEditOrderStatus(''); setEditTrackingNumber(''); }}
+                                      className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                    >
+                                      Cancel
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Tracking Number (if set) */}
+                                {order.trackingNumber && (
+                                  <div className="flex items-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                                    <Truck className="h-5 w-5 text-blue-500 mr-2 flex-shrink-0" />
+                                    <div>
+                                      <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Current Tracking Number</p>
+                                      <p className="text-sm font-bold text-blue-900 dark:text-blue-100">{order.trackingNumber}</p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Delivery Address */}
+                                <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                  <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2 flex items-center">
+                                    <MapPin className="h-3.5 w-3.5 mr-1" />
+                                    Delivery Address
+                                  </p>
+                                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{order.deliveryAddress?.fullName}</p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">{order.deliveryAddress?.phone}</p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {order.deliveryAddress?.address}, {order.deliveryAddress?.city}, {order.deliveryAddress?.state} - {order.deliveryAddress?.pincode}
+                                  </p>
+                                </div>
+
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <Outlet />
             </div>
           </div>
