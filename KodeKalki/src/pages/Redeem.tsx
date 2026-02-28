@@ -1195,135 +1195,163 @@ const Redeem: React.FC = () => {
                   }
                 </div>
               </div>
-
-              {/* Expanded Details */}
-              {isExpanded && (
-                <div className="border-t border-gray-100 dark:border-gray-700 p-5 space-y-5">
-                  {/* Progress Tracker */}
-                  {order.status !== 'cancelled' && (
-                    <div>
-                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Order Progress</p>
-                      <div className="relative">
-                        <div className="absolute top-5 left-5 right-5 h-0.5 bg-gray-200 dark:bg-gray-700 z-0">
-                          <div
-                            className="h-full bg-blue-500 transition-all duration-500"
-                            style={{ width: `${currentIdx === 0 ? 0 : currentIdx >= 3 ? 100 : (currentIdx / 3) * 100}%` }}
-                          />
-                        </div>
-                        <div className="relative z-10 flex justify-between">
-                          {steps.map((step, idx) => {
-                            const isDone = idx <= currentIdx;
-                            const isActive = idx === currentIdx;
-                            return (
-                              <div key={step.key} className="flex flex-col items-center w-1/4">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-2 transition-all duration-300 ${
-                                  isDone ? 'bg-blue-600 border-blue-600 shadow-md' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
-                                } ${isActive ? 'ring-4 ring-blue-200 dark:ring-blue-900' : ''}`}>
-                                  <span className={isDone ? 'grayscale-0' : 'grayscale opacity-40'}>
-                                    {step.icon}
-                                  </span>
-                                </div>
-                                <p className={`mt-2 text-xs font-medium text-center ${
-                                  isDone ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-600'
-                                }`}>
-                                  {step.label}
-                                </p>
-                                {isActive && (
-                                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-0.5 max-w-[80px]">
-                                    {step.desc}
-                                  </p>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Cancel Order Button */}
-                  {canCancel && (
-                    <div className="flex justify-end">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCancellingOrderId(order._id);
-                          setShowCancelModal(true);
-                        }}
-                        className="flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium transition-colors border border-red-200 dark:border-red-800"
-                      >
-                        <XCircle className="h-4 w-4 mr-2" />
-                        Cancel Order
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Predicted Delivery Date Display */}
-                  {order.status !== 'cancelled' && order.status !== 'delivered' && order.predictedDeliveryDate && (
-                    <div className="flex items-center p-3 bg-purple-50/80 dark:bg-purple-900/20 backdrop-blur-sm rounded-lg border border-purple-200 dark:border-purple-800">
-                      <Calendar className="h-5 w-5 text-purple-500 mr-2 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-purple-700 dark:text-purple-300">📅 Estimated Delivery</p>
-                        <p className="text-sm font-bold text-purple-900 dark:text-purple-100">
-                          {new Date(order.predictedDeliveryDate).toLocaleString('en-IN', {
-                            day: '2-digit',
-                            month: 'short',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                        <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
-                          Expected arrival date
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Tracking Number */}
-                  {order.trackingNumber && (
-                    <div className="flex items-center p-3 bg-blue-50/80 dark:bg-blue-900/20 backdrop-blur-sm rounded-lg border border-blue-200 dark:border-blue-800">
-                      <Truck className="h-5 w-5 text-blue-500 mr-2 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Tracking Number</p>
-                        <p className="text-sm font-bold text-blue-900 dark:text-blue-100">{order.trackingNumber}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Delivered Date */}
-                  {order.status === 'delivered' && (
-                    <div className="flex items-center p-3 bg-green-50/80 dark:bg-green-900/20 backdrop-blur-sm rounded-lg border border-green-200 dark:border-green-800">
-                      <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" />
-                      <div>
-                        <p className="text-xs font-medium text-green-700 dark:text-green-300">Delivered On</p>
-                        <p className="text-sm font-bold text-green-900 dark:text-green-100">
-                          {order.deliveredAt
-                            ? new Date(order.deliveredAt).toLocaleString('en-IN', {
-                                day: '2-digit', month: 'short', year: 'numeric',
-                                hour: '2-digit', minute: '2-digit'
-                              })
-                            : 'Date not recorded (Contact support if issue persists)'
-                          }
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Delivery Address */}
-                  <div className="p-3 bg-gray-50/80 dark:bg-gray-700/50 backdrop-blur-sm rounded-lg">
-                    <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2 flex items-center">
-                      <MapPin className="h-3.5 w-3.5 mr-1" />
-                      Delivery Address
-                    </p>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{order.deliveryAddress?.fullName}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{order.deliveryAddress?.phone}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {order.deliveryAddress?.address}, {order.deliveryAddress?.city}, {order.deliveryAddress?.state} - {order.deliveryAddress?.pincode}
-                    </p>
+{isExpanded && (
+  <div className="border-t border-gray-100 dark:border-gray-700 p-5 space-y-5">
+    {/* Progress Tracker */}
+    {order.status !== 'cancelled' && (
+      <div>
+        <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Order Progress</p>
+        <div className="relative">
+          <div className="absolute top-5 left-5 right-5 h-0.5 bg-gray-200 dark:bg-gray-700 z-0">
+            <div
+              className="h-full bg-blue-500 transition-all duration-500"
+              style={{ width: `${currentIdx === 0 ? 0 : currentIdx >= 3 ? 100 : (currentIdx / 3) * 100}%` }}
+            />
+          </div>
+          <div className="relative z-10 flex justify-between">
+            {steps.map((step, idx) => {
+              const isDone = idx <= currentIdx;
+              const isActive = idx === currentIdx;
+              return (
+                <div key={step.key} className="flex flex-col items-center w-1/4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-2 transition-all duration-300 ${
+                    isDone ? 'bg-blue-600 border-blue-600 shadow-md' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
+                  } ${isActive ? 'ring-4 ring-blue-200 dark:ring-blue-900' : ''}`}>
+                    <span className={isDone ? 'grayscale-0' : 'grayscale opacity-40'}>
+                      {step.icon}
+                    </span>
                   </div>
+                  <p className={`mt-2 text-xs font-medium text-center ${
+                    isDone ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-600'
+                  }`}>
+                    {step.label}
+                  </p>
+                  {isActive && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-0.5 max-w-[80px]">
+                      {step.desc}
+                    </p>
+                  )}
                 </div>
-              )}
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Cancel Order Button */}
+    {canCancel && (
+      <div className="flex justify-end">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setCancellingOrderId(order._id);
+            setShowCancelModal(true);
+          }}
+          className="flex items-center px-4 py-2 bg-red-100 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg text-sm font-medium transition-colors border border-red-200 dark:border-red-800"
+        >
+          <XCircle className="h-4 w-4 mr-2" />
+          Cancel Order
+        </button>
+      </div>
+    )}
+
+    {/* ========== NEW: Cancellation Info for Cancelled Orders ========== */}
+    {order.status === 'cancelled' && (
+      <div className="p-4 bg-red-50/80 dark:bg-red-900/20 backdrop-blur-sm rounded-lg border border-red-200 dark:border-red-800">
+        <div className="flex items-start">
+          <XCircle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+              {order.cancelledBy === 'admin' 
+                ? '❌ Cancelled by Admin' 
+                : order.cancelledBy === 'user'
+                ? '🚫 You cancelled this order'
+                : '❌ Order Cancelled'}
+            </p>
+            {order.cancelReason && (
+              <p className="text-sm text-red-600 dark:text-red-400 mt-1 break-words">
+                <span className="font-medium">Reason:</span> {order.cancelReason}
+              </p>
+            )}
+            {order.cancelledAt && (
+              <p className="text-xs text-red-500 dark:text-red-400 mt-2">
+                Cancelled on: {new Date(order.cancelledAt).toLocaleString('en-IN', {
+                  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                })}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Predicted Delivery Date Display */}
+    {order.status !== 'cancelled' && order.status !== 'delivered' && order.predictedDeliveryDate && (
+      <div className="flex items-center p-3 bg-purple-50/80 dark:bg-purple-900/20 backdrop-blur-sm rounded-lg border border-purple-200 dark:border-purple-800">
+        <Calendar className="h-5 w-5 text-purple-500 mr-2 flex-shrink-0" />
+        <div>
+          <p className="text-xs font-medium text-purple-700 dark:text-purple-300">📅 Estimated Delivery</p>
+          <p className="text-sm font-bold text-purple-900 dark:text-purple-100">
+            {new Date(order.predictedDeliveryDate).toLocaleString('en-IN', {
+              day: '2-digit',
+              month: 'short',
+              year: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}
+          </p>
+          <p className="text-xs text-purple-600 dark:text-purple-400 mt-1">
+            Expected arrival date
+          </p>
+        </div>
+      </div>
+    )}
+
+    {/* Tracking Number */}
+    {order.trackingNumber && (
+      <div className="flex items-center p-3 bg-blue-50/80 dark:bg-blue-900/20 backdrop-blur-sm rounded-lg border border-blue-200 dark:border-blue-800">
+        <Truck className="h-5 w-5 text-blue-500 mr-2 flex-shrink-0" />
+        <div>
+          <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Tracking Number</p>
+          <p className="text-sm font-bold text-blue-900 dark:text-blue-100">{order.trackingNumber}</p>
+        </div>
+      </div>
+    )}
+
+    {/* Delivered Date */}
+    {order.status === 'delivered' && (
+      <div className="flex items-center p-3 bg-green-50/80 dark:bg-green-900/20 backdrop-blur-sm rounded-lg border border-green-200 dark:border-green-800">
+        <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" />
+        <div>
+          <p className="text-xs font-medium text-green-700 dark:text-green-300">Delivered On</p>
+          <p className="text-sm font-bold text-green-900 dark:text-green-100">
+            {order.deliveredAt
+              ? new Date(order.deliveredAt).toLocaleString('en-IN', {
+                  day: '2-digit', month: 'short', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit'
+                })
+              : 'Date not recorded (Contact support if issue persists)'
+            }
+          </p>
+        </div>
+      </div>
+    )}
+
+    {/* Delivery Address */}
+    <div className="p-3 bg-gray-50/80 dark:bg-gray-700/50 backdrop-blur-sm rounded-lg">
+      <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2 flex items-center">
+        <MapPin className="h-3.5 w-3.5 mr-1" />
+        Delivery Address
+      </p>
+      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{order.deliveryAddress?.fullName}</p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">{order.deliveryAddress?.phone}</p>
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        {order.deliveryAddress?.address}, {order.deliveryAddress?.city}, {order.deliveryAddress?.state} - {order.deliveryAddress?.pincode}
+      </p>
+    </div>
+  </div>
+)}
             </div>
           );
         })}
