@@ -1264,7 +1264,7 @@ const Redeem: React.FC = () => {
       <div className="flex-1">
         <p className="text-sm font-semibold text-red-700 dark:text-red-300">
           {order.cancelledBy === 'admin' 
-            ? '❌ Cancelled by Admin' 
+            ? '❌ Cancelled by KodeKalki Team' 
             : order.cancelledBy === 'user'
             ? '🚫 You cancelled this order'
             : '❌ Order Cancelled'}
