@@ -4903,132 +4903,133 @@ const updateData = {
                       </div>
                     </div>
                   )}
-{/* Admin Edit Section in AdminDashboard.tsx */}
-<div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
-  <p className="text-sm font-semibold text-orange-700 dark:text-orange-300 mb-3 flex items-center">
-    <Edit className="h-4 w-4 mr-1.5" />
-    Admin — Update Order
-  </p>
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-    {/* Status dropdown */}
-    <div>
-      <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-        Order Status
-      </label>
-      <select
-        value={editOrderStatus}
-        onChange={(e) => {
-          setEditOrderStatus(e.target.value);
-          if (e.target.value !== 'delivered') {
-            setEditDeliveredAt('');
-          } else if (!editDeliveredAt) {
-            setEditDeliveredAt(new Date().toISOString().slice(0,16));
+{/* Admin Edit Section - Hidden for any cancelled order */}
+{order.status !== "cancelled" && (
+  <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+    <p className="text-sm font-semibold text-orange-700 dark:text-orange-300 mb-3 flex items-center">
+      <Edit className="h-4 w-4 mr-1.5" />
+      Admin — Update Order
+    </p>
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {/* Status dropdown */}
+      <div>
+        <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
+          Order Status
+        </label>
+        <select
+          value={editOrderStatus}
+          onChange={(e) => {
+            setEditOrderStatus(e.target.value);
+            // Auto‑fill delivered date only when switching to delivered and field is empty
+            if (e.target.value === 'delivered' && !editDeliveredAt) {
+              setEditDeliveredAt(new Date().toISOString().slice(0, 16));
+            }
+          }}
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
+        >
+          <option value="pending">🕐 Pending</option>
+          <option value="processing">⚙️ Processing</option>
+          <option value="shipped">🚚 Shipped / On the Way</option>
+          <option value="delivered">✅ Delivered</option>
+          <option value="cancelled">❌ Cancelled</option>
+        </select>
+      </div>
+
+      {/* Tracking number */}
+      <div>
+        <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
+          Tracking Number (optional)
+        </label>
+        <input
+          type="text"
+          value={editTrackingNumber}
+          onChange={(e) => setEditTrackingNumber(e.target.value)}
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
+          placeholder="e.g., IND123456789IN"
+        />
+      </div>
+
+      {/* Predicted delivery date */}
+      {(editOrderStatus === 'processing' || editOrderStatus === 'shipped') && (
+        <div className="md:col-span-2">
+          <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
+            📅 Predicted Delivery Date <span className="text-gray-400">(estimated arrival)</span>
+          </label>
+          <input
+            type="datetime-local"
+            value={editPredictedDeliveryDate}
+            onChange={(e) => setEditPredictedDeliveryDate(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            Auto-set to 7 days from now if left empty for shipped orders
+          </p>
+        </div>
+      )}
+
+      {/* Delivered date - shown only when status is delivered */}
+      {editOrderStatus === 'delivered' && (
+        <div className="md:col-span-2">
+          <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
+            Delivered Date & Time <span className="text-gray-400">(leave empty to use current time)</span>
+          </label>
+          <input
+            type="datetime-local"
+            value={editDeliveredAt}
+            onChange={(e) => setEditDeliveredAt(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
+          />
+        </div>
+      )}
+
+      {/* Cancellation reason */}
+      {editOrderStatus === 'cancelled' && (
+        <div className="md:col-span-2">
+          <label className="block text-xs font-medium mb-1.5 text-red-600 dark:text-red-400">
+            Cancellation Reason <span className="text-red-500">*</span>
+          </label>
+          <textarea
+            value={editCancelReason}
+            onChange={(e) => setEditCancelReason(e.target.value)}
+            rows={3}
+            className="w-full px-3 py-2 border border-red-300 dark:border-red-600 rounded-lg focus:ring-2 focus:ring-red-400 dark:bg-gray-700 dark:text-white text-sm"
+            placeholder="Enter reason for cancelling this order..."
+          />
+        </div>
+      )}
+    </div>
+
+    {/* Save button */}
+    <div className="flex space-x-2 mt-3">
+      <button
+        onClick={() => {
+          if (editOrderStatus === 'cancelled' && !editCancelReason.trim()) {
+            showNotification('error', 'Cancellation reason is required');
+            return;
           }
+          handleUpdateOrderStatus(order._id);
         }}
-        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
+        className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
       >
-        <option value="pending">🕐 Pending</option>
-        <option value="processing">⚙️ Processing</option>
-        <option value="shipped">🚚 Shipped / On the Way</option>
-        <option value="delivered">✅ Delivered</option>
-        <option value="cancelled">❌ Cancelled</option>
-      </select>
+        <Save className="h-3.5 w-3.5 mr-1.5" />
+        Save Changes
+      </button>
+      <button
+        onClick={() => {
+          setEditingOrderId(null);
+          setEditOrderStatus('');
+          setEditTrackingNumber('');
+          setEditCancelReason('');
+          setEditDeliveredAt('');
+          setEditPredictedDeliveryDate('');
+        }}
+        className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+      >
+        Cancel
+      </button>
     </div>
-    
-    {/* Tracking number */}
-    <div>
-      <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-        Tracking Number (optional)
-      </label>
-      <input
-        type="text"
-        value={editTrackingNumber}
-        onChange={(e) => setEditTrackingNumber(e.target.value)}
-        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
-        placeholder="e.g., IND123456789IN"
-      />
-    </div>
-    
-    {/* 👇 ADD PREDICTED DELIVERY DATE FIELD */}
-    {(editOrderStatus === 'processing' || editOrderStatus === 'shipped') && (
-      <div className="md:col-span-2">
-        <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-          📅 Predicted Delivery Date <span className="text-gray-400">(estimated arrival)</span>
-        </label>
-        <input
-          type="datetime-local"
-          value={editPredictedDeliveryDate}
-          onChange={(e) => setEditPredictedDeliveryDate(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          Auto-set to 7 days from now if left empty for shipped orders
-        </p>
-      </div>
-    )}
-    
-    {/* Delivered date */}
-    {editOrderStatus === 'delivered' && (
-      <div className="md:col-span-2">
-        <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-          Delivered Date & Time <span className="text-gray-400">(leave empty to use current time)</span>
-        </label>
-        <input
-          type="datetime-local"
-          value={editDeliveredAt}
-          onChange={(e) => setEditDeliveredAt(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
-        />
-      </div>
-    )}
-    
-    {/* Cancellation reason */}
-    {editOrderStatus === 'cancelled' && (
-      <div className="md:col-span-2">
-        <label className="block text-xs font-medium mb-1.5 text-red-600 dark:text-red-400">
-          Cancellation Reason <span className="text-red-500">*</span>
-        </label>
-        <textarea
-          value={editCancelReason}
-          onChange={(e) => setEditCancelReason(e.target.value)}
-          rows={3}
-          className="w-full px-3 py-2 border border-red-300 dark:border-red-600 rounded-lg focus:ring-2 focus:ring-red-400 dark:bg-gray-700 dark:text-white text-sm"
-          placeholder="Enter reason for cancelling this order..."
-        />
-      </div>
-    )}
   </div>
-  
-  {/* Save button */}
-  <div className="flex space-x-2 mt-3">
-    <button
-      onClick={() => {
-        if (editOrderStatus === 'cancelled' && !editCancelReason.trim()) {
-          showNotification('error', 'Cancellation reason is required');
-          return;
-        }
-        handleUpdateOrderStatus(order._id);
-      }}
-      className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
-    >
-      <Save className="h-3.5 w-3.5 mr-1.5" />
-      Save Changes
-    </button>
-    <button
-      onClick={() => {
-        setEditingOrderId(null);
-        setEditOrderStatus('');
-        setEditTrackingNumber('');
-        setEditCancelReason('');
-        setEditDeliveredAt('');
-        setEditPredictedDeliveryDate('');
-      }}
-      className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-    >
-      Cancel
-    </button>
-  </div>
-</div>
+)}
                   {/* Cancelled Banner */}
                   {order.status === 'cancelled' && (
                     <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-lg p-3">
