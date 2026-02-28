@@ -1257,34 +1257,35 @@ const Redeem: React.FC = () => {
     )}
 
     {/* ========== NEW: Cancellation Info for Cancelled Orders ========== */}
-    {order.status === 'cancelled' && (
-      <div className="p-4 bg-red-50/80 dark:bg-red-900/20 backdrop-blur-sm rounded-lg border border-red-200 dark:border-red-800">
-        <div className="flex items-start">
-          <XCircle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-red-700 dark:text-red-300">
-              {order.cancelledBy === 'admin' 
-                ? '❌ Cancelled by Admin' 
-                : order.cancelledBy === 'user'
-                ? '🚫 You cancelled this order'
-                : '❌ Order Cancelled'}
-            </p>
-            {order.cancelReason && (
-              <p className="text-sm text-red-600 dark:text-red-400 mt-1 break-words">
-                <span className="font-medium">Reason:</span> {order.cancelReason}
-              </p>
-            )}
-            {order.cancelledAt && (
-              <p className="text-xs text-red-500 dark:text-red-400 mt-2">
-                Cancelled on: {new Date(order.cancelledAt).toLocaleString('en-IN', {
-                  day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
-                })}
-              </p>
-            )}
-          </div>
-        </div>
+   {order.status === 'cancelled' && (
+  <div className="p-4 bg-red-50/80 dark:bg-red-900/20 backdrop-blur-sm rounded-lg border border-red-200 dark:border-red-800">
+    <div className="flex items-start">
+      <XCircle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0 mt-0.5" />
+      <div className="flex-1">
+        <p className="text-sm font-semibold text-red-700 dark:text-red-300">
+          {order.cancelledBy === 'admin' 
+            ? '❌ Cancelled by Admin' 
+            : order.cancelledBy === 'user'
+            ? '🚫 You cancelled this order'
+            : '❌ Order Cancelled'}
+        </p>
+        {/* Show reason only if cancelled by admin */}
+        {order.cancelReason && order.cancelledBy === 'admin' && (
+          <p className="text-sm text-red-600 dark:text-red-400 mt-1 break-words">
+            <span className="font-medium">Reason:</span> {order.cancelReason}
+          </p>
+        )}
+        {order.cancelledAt && (
+          <p className="text-xs text-red-500 dark:text-red-400 mt-2">
+            Cancelled on: {new Date(order.cancelledAt).toLocaleString('en-IN', {
+              day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit'
+            })}
+          </p>
+        )}
       </div>
-    )}
+    </div>
+  </div>
+)}
 
     {/* Predicted Delivery Date Display */}
     {order.status !== 'cancelled' && order.status !== 'delivered' && order.predictedDeliveryDate && (
