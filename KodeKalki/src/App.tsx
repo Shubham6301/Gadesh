@@ -2,7 +2,10 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
-import { API_URL } from './config/api'; // ✅ ADDED: Import API_URL
+// @ts-ignore
+import { NotificationProvider } from './contexts/NotificationContext';
+// @ts-ignore  
+import Notifications from './pages/Notifications';import { API_URL } from './config/api'; // ✅ ADDED: Import API_URL
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
 import ViewDocumentsTab from './components/Admin/ViewDocumentsTab';
@@ -622,6 +625,10 @@ const AppRoutes = () => {
             <Route path="/company-problems" element={<CompanyProblems />} />
             <Route path="/help" element={<Help />} />
             <Route path="/help/:slug" element={<HelpArticle />} />
+
+            {/* 🔔 Notifications Page */}
+            <Route path="/notifications" element={<ProtectedRoute><Notifications /></ProtectedRoute>} />
+
            {/* Admin Dashboard */}
             <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>}>
             {/* Dashboard default view (overview) */}
@@ -657,8 +664,11 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
-        <AppRoutes />
-        <Toaster position="bottom-right" />
+        {/* 🔔 NotificationProvider — AuthProvider ke andar hona zaroori hai */}
+        <NotificationProvider>
+          <AppRoutes />
+          <Toaster position="bottom-right" />
+        </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
   );
