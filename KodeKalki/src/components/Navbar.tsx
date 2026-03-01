@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import HelpWidget from "./HelpWidgetComponent";
+import NotificationBell from "./NotificationBell"; // 🔔 ADD
 import {
   Code,
   Menu,
@@ -78,12 +79,12 @@ const Navbar: React.FC = () => {
       }`}
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
+        <div className="flex items-center h-16 gap-8">
           {/* Logo */}
           <Link
             to="/"
             onClick={() => setIsMobileMenuOpen(false)}
-            className="flex items-center space-x-2 group"
+            className="flex items-center space-x-2 group flex-shrink-0"
           >
             <div className="p-1.5 rounded-lg bg-gradient-to-br from-orange-600 to-orange-700">
               <Code className="h-5 w-5 text-white" />
@@ -98,7 +99,7 @@ const Navbar: React.FC = () => {
           </Link>
 
           {/* Desktop Navigation */}
-          <div className="hidden lg:flex items-center space-x-8">
+          <div className="hidden lg:flex items-center gap-8 flex-1">
             {/* Creators - sirf !user, Problems se pehle, same styling */}
             {/* {!user && (
               <a
@@ -174,7 +175,7 @@ const Navbar: React.FC = () => {
           </div>
 
           {/* Desktop Right Section */}
-          <div className="hidden lg:flex items-center space-x-4">
+          <div className="hidden lg:flex items-center gap-4 ml-auto flex-shrink-0">
             {/* Streak Fire Icon */}
             {user && (
               <Link
@@ -192,6 +193,9 @@ const Navbar: React.FC = () => {
                 </span>
               </Link>
             )}
+
+            {/* 🔔 Notification Bell - Only show when logged in */}
+            {user && <NotificationBell />}
 
             {/* Help Widget - Only show when logged in */}
             {user && <HelpWidget />}
@@ -216,7 +220,7 @@ const Navbar: React.FC = () => {
             </button>
 
             {user ? (
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center gap-4">
                 {/* Coins */}
                 <Link
                   to="/redeem"
@@ -316,7 +320,7 @@ const Navbar: React.FC = () => {
                 </div>
               </div>
             ) : (
-              <div className="flex items-center space-x-3">
+              <div className="flex items-center gap-4">
                 <Link
                   to="/login"
                   className={`px-4 py-2 text-sm font-medium transition-colors duration-200 ${
@@ -340,7 +344,7 @@ const Navbar: React.FC = () => {
           {/* Mobile Menu Button */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className={`lg:hidden p-2 rounded-lg transition-colors duration-200 ${
+            className={`lg:hidden p-2 rounded-lg transition-colors duration-200 ml-auto ${
               isDark
                 ? "text-gray-400 hover:text-white hover:bg-gray-800"
                 : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
@@ -387,16 +391,21 @@ const Navbar: React.FC = () => {
                     KodeKalki
                   </span>
                 </Link>
-                <button
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className={`p-2 rounded-lg transition-colors duration-200 ${
-                    isDark
-                      ? "text-gray-400 hover:text-white hover:bg-gray-800"
-                      : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-                  }`}
-                >
-                  <X className="h-6 w-6" />
-                </button>
+
+                {/* 🔔 Mobile header: Bell + Close button */}
+                <div className="flex items-center gap-2">
+                  {user && <NotificationBell />}
+                  <button
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`p-2 rounded-lg transition-colors duration-200 ${
+                      isDark
+                        ? "text-gray-400 hover:text-white hover:bg-gray-800"
+                        : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+                    }`}
+                  >
+                    <X className="h-6 w-6" />
+                  </button>
+                </div>
               </div>
 
               {/* Navigation Items */}
