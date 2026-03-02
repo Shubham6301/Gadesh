@@ -26,9 +26,11 @@ interface Subject {
   color: string;
 }
 
-interface AddDocumentTabProps {}
+interface AddDocumentTabProps {
+  showNotification?: (type: 'success' | 'error' | 'info', message: string) => void;
+}
 
-const AddDocumentTab: React.FC<AddDocumentTabProps> = () => {
+const AddDocumentTab: React.FC<AddDocumentTabProps> = ({ showNotification }) => {
   const { token } = useAuth();
   const { isDark } = useTheme();
 
@@ -37,6 +39,15 @@ const AddDocumentTab: React.FC<AddDocumentTabProps> = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const notify = (type: 'success' | 'error' | 'info', text: string) => {
+    // Use parent's showNotification (fixed popup) if available, else fallback to inline
+    if (showNotification) {
+      showNotification(type, text);
+    } else {
+      setMessage({ type: type === 'info' ? 'success' : type, text });
+    }
+  };
   
   const [formData, setFormData] = useState({
     title: '',
@@ -116,10 +127,8 @@ const AddDocumentTab: React.FC<AddDocumentTabProps> = () => {
       });
 
       if (response.data.success) {
-        setMessage({
-          type: 'success',
-          text: `Document ${publish ? 'published' : 'saved'} successfully!`
-        });
+        notify('success', `Document ${publish ? 'published' : 'saved'} successfully!`);
+        setMessage(null);
         
         // Reset form after successful save
         if (publish) {
@@ -137,10 +146,7 @@ const AddDocumentTab: React.FC<AddDocumentTabProps> = () => {
       }
     } catch (error: any) {
       console.error('Error saving document:', error);
-      setMessage({
-        type: 'error',
-        text: error.response?.data?.message || error.message || 'Failed to save document'
-      });
+      notify('error', error.response?.data?.message || error.message || 'Failed to save document');
     } finally {
       setSaving(false);
     }
