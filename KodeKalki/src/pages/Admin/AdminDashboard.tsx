@@ -8,6 +8,7 @@ import { useTheme } from "../../contexts/ThemeContext";
 import ViewDocumentsTab from "../../components/Admin/ViewDocumentsTab";
 import AddDocumentTab from "../../components/Admin/AddDocumentTab";
 import HelpManagement from '../../components/Admin/HelpAdminPanel';
+import NotificationsAdminTab from '../../components/Admin/NotificationsAdminTab'; // 🔔
 
 import {
   Plus,
@@ -36,8 +37,9 @@ import {
   FileText,
   Truck,
   MapPin,
-   XCircle,
-   CheckCircle
+  XCircle,
+  CheckCircle,
+  Bell,
 } from "lucide-react";
 
 interface MCQQuestion {
@@ -83,6 +85,7 @@ interface RedeemOrder {
   status: string;
   createdAt: string;
 }
+
 interface RedeemOrderAdmin {
   _id: string;
   userId: { _id: string; username: string; email: string };
@@ -100,10 +103,10 @@ interface RedeemOrderAdmin {
   };
   orderDate: string;
   trackingNumber?: string;
-cancelledBy?: "admin" | "user"
-cancelReason?: string
-cancelledAt?: string;  // ADD THIS LINE
-deliveredAt?: string; 
+  cancelledBy?: "admin" | "user";
+  cancelReason?: string;
+  cancelledAt?: string;
+  deliveredAt?: string;
 }
 
 interface ChatRoom {
@@ -221,11 +224,11 @@ const AdminDashboard: React.FC = () => {
   } | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [showCreateUser, setShowCreateUser] = useState(false);
-  const [editingUserId, setEditingUserId] = useState<string | null>(null);
-  const [editUserData, setEditUserData] = useState<any>(null);
   const [editCancelReason, setEditCancelReason] = useState("");
   const [editDeliveredAt, setEditDeliveredAt] = useState('');
-const [editPredictedDeliveryDate, setEditPredictedDeliveryDate] = useState('');
+  const [editPredictedDeliveryDate, setEditPredictedDeliveryDate] = useState('');
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editUserData, setEditUserData] = useState<any>(null);
   const [newUser, setNewUser] = useState({
     username: "",
     email: "",
@@ -320,6 +323,8 @@ const [editPredictedDeliveryDate, setEditPredictedDeliveryDate] = useState('');
 
   // MCQ Questions state
   const [showCreateMCQ, setShowCreateMCQ] = useState(false);
+  const [editingMCQId, setEditingMCQId] = useState<string | null>(null);
+  const [editMCQData, setEditMCQData] = useState<any>(null);
   const [newMCQ, setNewMCQ] = useState({
     question: "",
     options: [
@@ -477,13 +482,14 @@ const fetchData = async () => {
       setUsers(uniqueUsers);
       setMcqQuestions(mcqRes.data.questions || []);
       setChatRooms(chatRoomsRes.data || []);
-      setRedeemOrders(redeemOrdersRes.data.orders || []);
+      setRedeemOrders(redeemOrdersRes.data.orders || redeemOrdersRes.data || []);
     } catch (error: any) {
       console.error("❌ [AdminDashboard] Error fetching admin data:", error);
     } finally {
       setLoading(false);
     }
   };
+
 const handleUpdateOrderStatus = async (orderId: string) => {
   try {
     const token = localStorage.getItem('token');
@@ -529,7 +535,6 @@ const handleUpdateOrderStatus = async (orderId: string) => {
     showNotification('error', `Failed to update order: ${error.response?.data?.error || error.message}`);
   }
 };
-
 
   const handleCreateProblem = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -783,6 +788,39 @@ const handleUpdateOrderStatus = async (orderId: string) => {
       showNotification("success", "MCQ Question deleted!");
     } catch (error: any) {
       showNotification("error", "Failed to delete MCQ question.");
+    }
+  };
+
+  const handleEditMCQ = (mcq: MCQQuestion) => {
+    setEditingMCQId(mcq._id);
+    setEditMCQData({
+      question: mcq.question,
+      options: mcq.options.map(o => ({ text: o.text, isCorrect: o.isCorrect })),
+      domain: mcq.domain,
+      difficulty: mcq.difficulty,
+      explanation: mcq.explanation || "",
+      tags: mcq.tags || [],
+      isActive: mcq.isActive,
+    });
+  };
+
+  const handleUpdateMCQ = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMCQId || !editMCQData) return;
+    try {
+      const token = localStorage.getItem("token");
+      const response = await axios.put(`${API_URL}/mcq/${editingMCQId}`, editMCQData, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+      setMcqQuestions(mcqQuestions.map(m => m._id === editingMCQId ? { ...m, ...response.data } : m));
+      showNotification("success", "MCQ Question updated successfully!");
+      setEditingMCQId(null);
+      setEditMCQData(null);
+    } catch (error: any) {
+      showNotification("error", `Failed to update MCQ: ${error.response?.data?.message || error.message}`);
     }
   };
 
@@ -1240,15 +1278,16 @@ const updateData = {
       label: "Add Document",
       icon: <Plus className="h-4 w-4" />,
     },  
-      {
-      id: "help",
-      label: "Help Articles",
-      icon: <FileText className="h-4 w-4" />,
-    },
+      { id: "help", label: "Help Articles", icon: <FileText className="h-4 w-4" /> },
     {
       id: "redeem-orders",
       label: "Redeem Orders",
       icon: <ShoppingCart className="h-4 w-4" />,
+    },
+    {
+      id: "notifications",
+      label: "Notifications",
+      icon: <Bell className="h-4 w-4" />,
     },
   ];
 
@@ -1573,21 +1612,20 @@ const updateData = {
           </div>
         </>
       )}
-     <div className="relative z-10">
+      <div className="relative z-10">
         {/* Notification */}
         {notification && (
           <div
-           style={{ position: 'fixed', top: '80px', right: '16px', zIndex: 999999 }}
-    className={`p-4 rounded-lg shadow-2xl border-2 ${
-
+            style={{ position: 'fixed', top: '80px', right: '16px', zIndex: 999999 }}
+            className={`p-4 rounded-lg shadow-2xl border-2 max-w-sm ${
               notification.type === "success"
-                ? "bg-green-100 text-green-800 border border-green-200"
+                ? "bg-green-100 text-green-800 border-green-400"
                 : notification.type === "error"
-                ? "bg-red-100 text-red-800 border border-red-200"
-                : "bg-blue-100 text-blue-800 border border-blue-200"
+                ? "bg-red-100 text-red-800 border-red-400"
+                : "bg-blue-100 text-blue-800 border-blue-400"
             }`}
           >
-            <p className="font-medium">{notification.message}</p>
+            <p className="font-semibold text-sm">{notification.message}</p>
           </div>
         )}
 
@@ -1628,19 +1666,19 @@ const updateData = {
           {/* Tabs */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="border-b border-gray-200">
-              <nav className="flex space-x-1 px-4 overflow-x-auto scrollbar-hide">
+              <nav className="flex overflow-x-auto scrollbar-hide px-2" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
-                    className={`flex items-center py-3 px-3 border-b-2 font-medium text-xs whitespace-nowrap transition-colors flex-shrink-0 ${
+                    className={`flex items-center gap-1.5 py-3 px-3 border-b-2 font-medium text-xs whitespace-nowrap flex-shrink-0 transition-colors ${
                       activeTab === tab.id
                         ? "border-blue-500 text-blue-600"
                         : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                     }`}
                   >
                     {tab.icon}
-                    <span className="ml-1.5">{tab.label}</span>
+                    <span>{tab.label}</span>
                   </button>
                 ))}
               </nav>
@@ -4448,6 +4486,158 @@ const updateData = {
                     </div>
                   )}
 
+                  {/* Edit MCQ Form */}
+                  {editingMCQId && editMCQData && (
+                    <div className="mb-6 p-6 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                      <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-lg font-semibold text-yellow-800 dark:text-yellow-200 flex items-center">
+                          <Edit className="mr-2 h-5 w-5" />
+                          Edit MCQ Question
+                        </h4>
+                        <button
+                          onClick={() => { setEditingMCQId(null); setEditMCQData(null); }}
+                          className="text-gray-500 hover:text-gray-700"
+                        >
+                          <X className="h-5 w-5" />
+                        </button>
+                      </div>
+                      <form onSubmit={handleUpdateMCQ} className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Question *</label>
+                          <textarea
+                            required
+                            rows={3}
+                            value={editMCQData.question}
+                            onChange={(e) => setEditMCQData({ ...editMCQData, question: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 dark:bg-gray-800 dark:text-white"
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-3">
+                          {editMCQData.options.map((option: any, index: number) => (
+                            <div key={index}>
+                              <label className="block text-sm font-medium mb-1">
+                                Option {index + 1}{" "}
+                                {option.isCorrect && <span className="text-green-600">(Correct)</span>}
+                              </label>
+                              <div className="flex space-x-2">
+                                <input
+                                  type="text"
+                                  value={option.text}
+                                  onChange={(e) => {
+                                    const opts = [...editMCQData.options];
+                                    opts[index] = { ...opts[index], text: e.target.value };
+                                    setEditMCQData({ ...editMCQData, options: opts });
+                                  }}
+                                  className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 dark:bg-gray-800 dark:text-white"
+                                  placeholder={`Option ${index + 1}`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const opts = editMCQData.options.map((o: any, i: number) => ({
+                                      ...o,
+                                      isCorrect: i === index,
+                                    }));
+                                    setEditMCQData({ ...editMCQData, options: opts });
+                                  }}
+                                  className={`px-3 py-2 rounded-md ${
+                                    option.isCorrect
+                                      ? "bg-green-600 text-white"
+                                      : "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                                  }`}
+                                  title="Mark as correct"
+                                >
+                                  <Check className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium mb-2">Domain</label>
+                            <select
+                              value={editMCQData.domain}
+                              onChange={(e) => setEditMCQData({ ...editMCQData, domain: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 dark:bg-gray-800 dark:text-white"
+                            >
+                              <option value="dsa">Data Structures & Algorithms</option>
+                              <option value="system-design">System Design</option>
+                              <option value="aiml">AI/ML</option>
+                              <option value="aptitude">Aptitude</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium mb-2">Difficulty</label>
+                            <select
+                              value={editMCQData.difficulty}
+                              onChange={(e) => setEditMCQData({ ...editMCQData, difficulty: e.target.value })}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 dark:bg-gray-800 dark:text-white"
+                            >
+                              <option value="Easy">Easy</option>
+                              <option value="Medium">Medium</option>
+                              <option value="Hard">Hard</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Tags (comma-separated)</label>
+                          <input
+                            type="text"
+                            value={editMCQData.tags.join(", ")}
+                            onChange={(e) =>
+                              setEditMCQData({
+                                ...editMCQData,
+                                tags: e.target.value.split(",").map((t: string) => t.trim()).filter(Boolean),
+                              })
+                            }
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 dark:bg-gray-800 dark:text-white"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Explanation (optional)</label>
+                          <textarea
+                            rows={2}
+                            value={editMCQData.explanation}
+                            onChange={(e) => setEditMCQData({ ...editMCQData, explanation: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 dark:bg-gray-800 dark:text-white"
+                          />
+                        </div>
+
+                        <div className="flex items-center">
+                          <input
+                            type="checkbox"
+                            checked={editMCQData.isActive}
+                            onChange={(e) => setEditMCQData({ ...editMCQData, isActive: e.target.checked })}
+                            className="mr-2"
+                          />
+                          <label className="text-sm">Active</label>
+                        </div>
+
+                        <div className="flex space-x-4">
+                          <button
+                            type="submit"
+                            className="flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors"
+                          >
+                            <Save className="h-4 w-4 mr-2" />
+                            Update MCQ
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setEditingMCQId(null); setEditMCQData(null); }}
+                            className="px-4 py-2 border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 gap-4">
                     {mcqQuestions.length === 0 ? (
                       <div className="text-center py-8 text-gray-500">
@@ -4491,7 +4681,11 @@ const updateData = {
                               </div>
                             </div>
                             <div className="flex space-x-2">
-                              <button className="text-blue-600 hover:text-blue-800 p-1">
+                              <button
+                                onClick={() => handleEditMCQ(mcq)}
+                                className="text-blue-600 hover:text-blue-800 p-1"
+                                title="Edit MCQ"
+                              >
                                 <Edit className="h-4 w-4" />
                               </button>
                               <button
@@ -4724,17 +4918,18 @@ const updateData = {
               )}
 
 
-            {activeTab === "help" && <HelpManagement />}
+            {activeTab === "help" && <HelpManagement showNotification={showNotification} />}
+              {/* Notifications Tab */}
+              {activeTab === "notifications" && <NotificationsAdminTab />}
               {/* View Documents Tab */}
-              {activeTab === "documents" && <ViewDocumentsTab />}
+              {activeTab === "documents" && <ViewDocumentsTab showNotification={showNotification} />}
 
               {/* Add Documents Tab */}
-              {activeTab === "add-document" && <AddDocumentTab />}
+              {activeTab === "add-document" && <AddDocumentTab showNotification={showNotification} />}
 
               {/* Redeem Orders Tab */}
 {activeTab === "redeem-orders" && (
   <div>
-    {/* Header with stats */}
     <div className="flex items-center justify-between mb-6">
       <h3 className="text-lg font-semibold flex items-center">
         <ShoppingCart className="mr-2 h-6 w-6 text-orange-600" />
@@ -4751,9 +4946,7 @@ const updateData = {
               s === 'processing'? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
               s === 'cancelled' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' :
                                   'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
-            }`}>
-              {s}: {count}
-            </span>
+            }`}>{s}: {count}</span>
           );
         })}
       </div>
@@ -4762,7 +4955,6 @@ const updateData = {
       <div className="text-center py-16 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
         <ShoppingCart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
         <p className="text-lg font-medium text-gray-500">No redeem orders found.</p>
-        <p className="text-sm text-gray-400">Orders will appear here once users redeem items.</p>
       </div>
     ) : (
       <div className="space-y-4">
@@ -4773,129 +4965,81 @@ const updateData = {
             { key: 'shipped', label: 'Shipped', icon: '🚚', desc: 'On the way' },
             { key: 'delivered', label: 'Delivered', icon: '✅', desc: 'Delivered!' },
           ];
-          const statusOrder = ['pending', 'processing', 'shipped', 'delivered'];
+          const statusOrder = ['pending','processing','shipped','delivered'];
           const currentIdx = order.status === 'cancelled' ? -1 : statusOrder.indexOf(order.status);
           const isExpanded = editingOrderId === order._id;
           return (
-            <div
-              key={order._id}
-              className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden"
-            >
-              {/* Card Header — click to expand */}
+            <div key={order._id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+              {/* Card Header */}
               <div
                 className="flex items-center p-4 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
                 onClick={() => {
-                  console.log('Expanding order:', order._id, 'Current status:', order.status, 'DeliveredAt:', order.deliveredAt); // Debug log
                   if (isExpanded) {
-                    setEditingOrderId(null);
-                    setEditOrderStatus('');
-                    setEditTrackingNumber('');
-                    setEditDeliveredAt('');
+                    setEditingOrderId(null); setEditOrderStatus(''); setEditTrackingNumber(''); setEditDeliveredAt('');
                   } else {
-                    setEditingOrderId(order._id);
-                    setEditOrderStatus(order.status);
+                    setEditingOrderId(order._id); setEditOrderStatus(order.status);
                     setEditTrackingNumber(order.trackingNumber || '');
-                    setEditDeliveredAt(order.deliveredAt ? new Date(order.deliveredAt).toISOString().slice(0,16) : new Date().toISOString().slice(0,16)); // Default to current if empty
+                    setEditDeliveredAt(order.deliveredAt ? new Date(order.deliveredAt).toISOString().slice(0,16) : new Date().toISOString().slice(0,16));
                   }
                 }}
               >
                 <div className="flex items-center space-x-4 flex-1">
                   {order.itemId?.imageUrl && (
-                    <img
-                      src={order.itemId.imageUrl}
-                      alt={order.itemId?.name}
-                      className="w-14 h-14 object-cover rounded-lg border border-gray-200 dark:border-gray-600 flex-shrink-0"
-                    />
+                    <img src={order.itemId.imageUrl} alt={order.itemId?.name} className="w-14 h-14 object-cover rounded-lg border flex-shrink-0" />
                   )}
                   <div>
-                    <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">
-                      {order.itemId?.name || 'Item'}
-                    </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                      👤 {order.userId?.username || 'N/A'} &bull; {order.userId?.email || ''}
-                    </p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                      Qty: {order.quantity} &bull; 🪙 {order.totalCost} coins &bull; {new Date(order.orderDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
-                    </p>
+                    <p className="font-semibold text-sm text-gray-900 dark:text-gray-100">{order.itemId?.name || 'Item'}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">👤 {order.userId?.username} • {order.userId?.email}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Qty: {order.quantity} • 🪙 {order.totalCost} coins • {new Date(order.orderDate).toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})}</p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-3 flex-shrink-0">
-                  <span className={`flex items-center px-3 py-1.5 rounded-full text-xs font-semibold ${
-                    order.status === 'delivered' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' :
-                    order.status === 'shipped' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
-                    order.status === 'processing' ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300' :
-                    order.status === 'cancelled' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
-                                                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                  }`}>
-                    {order.status === 'pending' && '🕐 '}
-                    {order.status === 'processing' && '⚙️ '}
-                    {order.status === 'shipped' && '🚚 '}
-                    {order.status === 'delivered' && '✅ '}
-                    {order.status === 'cancelled' && '❌ '}
-                    {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                  <span className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
+                    order.status==='delivered'?'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300':
+                    order.status==='shipped'?'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300':
+                    order.status==='processing'?'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300':
+                    order.status==='cancelled'?'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300':
+                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'}`}>
+                    {order.status==='pending'&&'🕐 '}{order.status==='processing'&&'⚙️ '}{order.status==='shipped'&&'🚚 '}{order.status==='delivered'&&'✅ '}{order.status==='cancelled'&&'❌ '}
+                    {order.status.charAt(0).toUpperCase()+order.status.slice(1)}
                   </span>
-                  {isExpanded
-                    ? <ChevronUp className="h-4 w-4 text-gray-400" />
-                    : <ChevronDown className="h-4 w-4 text-gray-400" />
-                  }
+                  {isExpanded?<ChevronUp className="h-4 w-4 text-gray-400"/>:<ChevronDown className="h-4 w-4 text-gray-400"/>}
                 </div>
               </div>
+
               {/* Expanded Section */}
               {isExpanded && (
                 <div className="border-t border-gray-100 dark:border-gray-700 p-5 space-y-5">
-                  {order.status === 'cancelled' && order.cancelReason && (
+                  {order.status==='cancelled' && order.cancelReason && (
                     <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                       <div className="flex items-start space-x-3">
-                        <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
-                        <div className="flex-1">
-                          <p className="text-sm font-semibold text-red-700 dark:text-red-300 mb-2">
-                            Cancellation Reason ({order.cancelledBy === "admin" ? "Admin" : "User"})
-                          </p>
-                          <p className="text-sm text-red-600 dark:text-red-400 bg-white/50 dark:bg-gray-800/50 p-3 rounded border border-red-200 dark:border-red-700">
-                            "{order.cancelReason}"
-                          </p>
-                          {order.cancelledAt && (
-                            <p className="text-xs text-red-500 dark:text-red-300 mt-2">
-                              Cancelled on: {new Date(order.cancelledAt).toLocaleString('en-IN', {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
-                            </p>
-                          )}
+                        <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5"/>
+                        <div>
+                          <p className="text-sm font-semibold text-red-700 dark:text-red-300 mb-2">Cancellation Reason ({order.cancelledBy==="admin"?"Admin":"User"})</p>
+                          <p className="text-sm text-red-600 dark:text-red-400 bg-white/50 dark:bg-gray-800/50 p-3 rounded border border-red-200 dark:border-red-700">"{order.cancelReason}"</p>
+                          {order.cancelledAt && <p className="text-xs text-red-500 mt-2">Cancelled on: {new Date(order.cancelledAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'})}</p>}
                         </div>
                       </div>
                     </div>
                   )}
-                  {order.status !== 'cancelled' && (
+
+                  {order.status!=='cancelled' && (
                     <div>
                       <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Order Progress</p>
                       <div className="relative">
                         <div className="absolute top-5 left-5 right-5 h-0.5 bg-gray-200 dark:bg-gray-700 z-0">
-                          <div
-                            className="h-full bg-blue-500 transition-all duration-500"
-                            style={{ width: `${currentIdx <= 0 ? 0 : currentIdx >= 3 ? 100 : (currentIdx / 3) * 100}%` }}
-                          />
+                          <div className="h-full bg-blue-500 transition-all duration-500" style={{width:`${currentIdx<=0?0:currentIdx>=3?100:(currentIdx/3)*100}%`}}/>
                         </div>
                         <div className="relative z-10 flex justify-between">
-                          {steps.map((step, idx) => {
-                            const isDone = idx <= currentIdx;
-                            const isActive = idx === currentIdx;
+                          {steps.map((step,idx)=>{
+                            const isDone=idx<=currentIdx; const isActive=idx===currentIdx;
                             return (
                               <div key={step.key} className="flex flex-col items-center w-1/4">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-2 transition-all duration-300 ${
-                                  isDone ? 'bg-blue-600 border-blue-600 shadow-md' : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'
-                                } ${isActive ? 'ring-4 ring-blue-200 dark:ring-blue-900' : ''}`}>
-                                  <span className={isDone ? '' : 'grayscale opacity-40'}>{step.icon}</span>
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center text-lg border-2 transition-all duration-300 ${isDone?'bg-blue-600 border-blue-600 shadow-md':'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600'} ${isActive?'ring-4 ring-blue-200 dark:ring-blue-900':''}`}>
+                                  <span className={isDone?'':'grayscale opacity-40'}>{step.icon}</span>
                                 </div>
-                                <p className={`mt-2 text-xs font-medium text-center ${isDone ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 dark:text-gray-600'}`}>
-                                  {step.label}
-                                </p>
-                                {isActive && (
-                                  <p className="text-xs text-gray-500 dark:text-gray-400 text-center mt-0.5 max-w-[80px]">{step.desc}</p>
-                                )}
+                                <p className={`mt-2 text-xs font-medium text-center ${isDone?'text-blue-600 dark:text-blue-400':'text-gray-400 dark:text-gray-600'}`}>{step.label}</p>
+                                {isActive && <p className="text-xs text-gray-500 text-center mt-0.5 max-w-[80px]">{step.desc}</p>}
                               </div>
                             );
                           })}
@@ -4903,185 +5047,98 @@ const updateData = {
                       </div>
                     </div>
                   )}
-{/* Admin Edit Section - Hidden for any cancelled order */}
-{order.status !== "cancelled" && (
-  <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
-    <p className="text-sm font-semibold text-orange-700 dark:text-orange-300 mb-3 flex items-center">
-      <Edit className="h-4 w-4 mr-1.5" />
-      Admin — Update Order
-    </p>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-      {/* Status dropdown */}
-      <div>
-        <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-          Order Status
-        </label>
-        <select
-          value={editOrderStatus}
-          onChange={(e) => {
-            setEditOrderStatus(e.target.value);
-            // Auto‑fill delivered date only when switching to delivered and field is empty
-            if (e.target.value === 'delivered' && !editDeliveredAt) {
-              setEditDeliveredAt(new Date().toISOString().slice(0, 16));
-            }
-          }}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
-        >
-          <option value="pending">🕐 Pending</option>
-          <option value="processing">⚙️ Processing</option>
-          <option value="shipped">🚚 Shipped / On the Way</option>
-          <option value="delivered">✅ Delivered</option>
-          <option value="cancelled">❌ Cancelled</option>
-        </select>
-      </div>
 
-      {/* Tracking number */}
-      <div>
-        <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-          Tracking Number (optional)
-        </label>
-        <input
-          type="text"
-          value={editTrackingNumber}
-          onChange={(e) => setEditTrackingNumber(e.target.value)}
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
-          placeholder="e.g., IND123456789IN"
-        />
-      </div>
+                  {order.status!=='cancelled' && (
+                    <div className="bg-orange-50 dark:bg-orange-900/10 border border-orange-200 dark:border-orange-800 rounded-lg p-4">
+                      <p className="text-sm font-semibold text-orange-700 dark:text-orange-300 mb-3 flex items-center"><Edit className="h-4 w-4 mr-1.5"/>Admin — Update Order</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">Order Status</label>
+                          <select value={editOrderStatus} onChange={(e)=>{setEditOrderStatus(e.target.value);if(e.target.value==='delivered'&&!editDeliveredAt)setEditDeliveredAt(new Date().toISOString().slice(0,16));}}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm">
+                            <option value="pending">🕐 Pending</option>
+                            <option value="processing">⚙️ Processing</option>
+                            <option value="shipped">🚚 Shipped</option>
+                            <option value="delivered">✅ Delivered</option>
+                            <option value="cancelled">❌ Cancelled</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">Tracking Number (optional)</label>
+                          <input type="text" value={editTrackingNumber} onChange={(e)=>setEditTrackingNumber(e.target.value)}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm" placeholder="e.g., IND123456789IN"/>
+                        </div>
+                        {(editOrderStatus==='processing'||editOrderStatus==='shipped') && (
+                          <div className="md:col-span-2">
+                            <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">📅 Predicted Delivery Date</label>
+                            <input type="datetime-local" value={editPredictedDeliveryDate} onChange={(e)=>setEditPredictedDeliveryDate(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"/>
+                            <p className="text-xs text-gray-400 mt-1">Auto-set to 7 days if empty for shipped orders</p>
+                          </div>
+                        )}
+                        {editOrderStatus==='delivered' && (
+                          <div className="md:col-span-2">
+                            <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">Delivered Date & Time</label>
+                            <input type="datetime-local" value={editDeliveredAt} onChange={(e)=>setEditDeliveredAt(e.target.value)}
+                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"/>
+                          </div>
+                        )}
+                        {editOrderStatus==='cancelled' && (
+                          <div className="md:col-span-2">
+                            <label className="block text-xs font-medium mb-1.5 text-red-600 dark:text-red-400">Cancellation Reason <span className="text-red-500">*</span></label>
+                            <textarea value={editCancelReason} onChange={(e)=>setEditCancelReason(e.target.value)} rows={3}
+                              className="w-full px-3 py-2 border border-red-300 dark:border-red-600 rounded-lg focus:ring-2 focus:ring-red-400 dark:bg-gray-700 dark:text-white text-sm" placeholder="Reason for cancelling..."/>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex space-x-2 mt-3">
+                        <button onClick={()=>{if(editOrderStatus==='cancelled'&&!editCancelReason.trim()){showNotification('error','Cancellation reason is required');return;}handleUpdateOrderStatus(order._id);}}
+                          className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors">
+                          <Save className="h-3.5 w-3.5 mr-1.5"/>Save Changes
+                        </button>
+                        <button onClick={()=>{setEditingOrderId(null);setEditOrderStatus('');setEditTrackingNumber('');setEditCancelReason('');setEditDeliveredAt('');setEditPredictedDeliveryDate('');}}
+                          className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-      {/* Predicted delivery date */}
-      {(editOrderStatus === 'processing' || editOrderStatus === 'shipped') && (
-        <div className="md:col-span-2">
-          <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-            📅 Predicted Delivery Date <span className="text-gray-400">(estimated arrival)</span>
-          </label>
-          <input
-            type="datetime-local"
-            value={editPredictedDeliveryDate}
-            onChange={(e) => setEditPredictedDeliveryDate(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
-          />
-          <p className="text-xs text-gray-400 mt-1">
-            Auto-set to 7 days from now if left empty for shipped orders
-          </p>
-        </div>
-      )}
-
-      {/* Delivered date - shown only when status is delivered */}
-      {editOrderStatus === 'delivered' && (
-        <div className="md:col-span-2">
-          <label className="block text-xs font-medium mb-1.5 text-gray-600 dark:text-gray-400">
-            Delivered Date & Time <span className="text-gray-400">(leave empty to use current time)</span>
-          </label>
-          <input
-            type="datetime-local"
-            value={editDeliveredAt}
-            onChange={(e) => setEditDeliveredAt(e.target.value)}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-orange-400 dark:bg-gray-700 dark:text-white text-sm"
-          />
-        </div>
-      )}
-
-      {/* Cancellation reason */}
-      {editOrderStatus === 'cancelled' && (
-        <div className="md:col-span-2">
-          <label className="block text-xs font-medium mb-1.5 text-red-600 dark:text-red-400">
-            Cancellation Reason <span className="text-red-500">*</span>
-          </label>
-          <textarea
-            value={editCancelReason}
-            onChange={(e) => setEditCancelReason(e.target.value)}
-            rows={3}
-            className="w-full px-3 py-2 border border-red-300 dark:border-red-600 rounded-lg focus:ring-2 focus:ring-red-400 dark:bg-gray-700 dark:text-white text-sm"
-            placeholder="Enter reason for cancelling this order..."
-          />
-        </div>
-      )}
-    </div>
-
-    {/* Save button */}
-    <div className="flex space-x-2 mt-3">
-      <button
-        onClick={() => {
-          if (editOrderStatus === 'cancelled' && !editCancelReason.trim()) {
-            showNotification('error', 'Cancellation reason is required');
-            return;
-          }
-          handleUpdateOrderStatus(order._id);
-        }}
-        className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
-      >
-        <Save className="h-3.5 w-3.5 mr-1.5" />
-        Save Changes
-      </button>
-      <button
-        onClick={() => {
-          setEditingOrderId(null);
-          setEditOrderStatus('');
-          setEditTrackingNumber('');
-          setEditCancelReason('');
-          setEditDeliveredAt('');
-          setEditPredictedDeliveryDate('');
-        }}
-        className="px-4 py-2 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-      >
-        Cancel
-      </button>
-    </div>
-  </div>
-)}
-                  {/* Cancelled Banner */}
-                  {order.status === 'cancelled' && (
+                  {order.status==='cancelled' && (
                     <div className="bg-red-50 dark:bg-red-900/10 border border-red-200 dark:border-red-800 rounded-lg p-3">
                       <p className="text-sm font-medium text-red-700 dark:text-red-300 flex items-center">
-                        <XCircle className="h-4 w-4 mr-2" />
-                        This order was cancelled by {order.cancelledBy === "admin" ? "Admin" : "User"}.
-                        {order.cancelledBy === "admin" && " Coins have been refunded."}
+                        <XCircle className="h-4 w-4 mr-2"/>This order was cancelled by {order.cancelledBy==="admin"?"Admin":"User"}.{order.cancelledBy==="admin"&&" Coins have been refunded."}
                       </p>
                     </div>
                   )}
-                  {/* Tracking Number Display */}
+
                   {order.trackingNumber && (
                     <div className="flex items-center p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                      <Truck className="h-5 w-5 text-blue-500 mr-2 flex-shrink-0" />
+                      <Truck className="h-5 w-5 text-blue-500 mr-2 flex-shrink-0"/>
                       <div>
                         <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Current Tracking Number</p>
                         <p className="text-sm font-bold text-blue-900 dark:text-blue-100">{order.trackingNumber}</p>
                       </div>
                     </div>
                   )}
-                  {/* Delivered Date Display */}
-                  {order.status === 'delivered' && (
+
+                  {order.status==='delivered' && (
                     <div className="flex items-center p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-                      <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0" />
+                      <CheckCircle className="h-5 w-5 text-green-500 mr-2 flex-shrink-0"/>
                       <div>
                         <p className="text-xs font-medium text-green-700 dark:text-green-300">Delivered On</p>
                         <p className="text-sm font-bold text-green-900 dark:text-green-100">
-                          {order.deliveredAt
-                            ? new Date(order.deliveredAt).toLocaleString('en-IN', {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })
-                            : 'Date not recorded (Save in edit mode to set)' // 👈 Added note
-                          }
+                          {order.deliveredAt ? new Date(order.deliveredAt).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'Not recorded'}
                         </p>
                       </div>
                     </div>
                   )}
-                  {/* Delivery Address */}
+
                   <div className="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2 flex items-center">
-                      <MapPin className="h-3.5 w-3.5 mr-1" />
-                      Delivery Address
-                    </p>
+                    <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2 flex items-center"><MapPin className="h-3.5 w-3.5 mr-1"/>Delivery Address</p>
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{order.deliveryAddress?.fullName}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">{order.deliveryAddress?.phone}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {order.deliveryAddress?.address}, {order.deliveryAddress?.city}, {order.deliveryAddress?.state} - {order.deliveryAddress?.pincode}
-                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{order.deliveryAddress?.address}, {order.deliveryAddress?.city}, {order.deliveryAddress?.state} - {order.deliveryAddress?.pincode}</p>
                   </div>
                 </div>
               )}
