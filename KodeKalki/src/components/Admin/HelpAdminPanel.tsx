@@ -27,11 +27,23 @@ const categories = [
   { value: 'general', label: 'General' }
 ];
 
-const HelpManagement: React.FC = () => {
+interface HelpManagementProps {
+  showNotification?: (type: 'success' | 'error' | 'info', message: string) => void;
+}
+
+const HelpManagement: React.FC<HelpManagementProps> = ({ showNotification }) => {
   const [articles, setArticles] = useState<HelpArticle[]>([]);
   const [showForm, setShowForm] = useState<boolean>(false);
   const [editingArticle, setEditingArticle] = useState<HelpArticle | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+
+  const notify = (type: 'success' | 'error' | 'info', message: string) => {
+    if (showNotification) {
+      showNotification(type, message);
+    } else {
+      alert(message);
+    }
+  };
 
   const [formData, setFormData] = useState({
     title: '',
@@ -85,10 +97,10 @@ const HelpManagement: React.FC = () => {
 
       resetForm();
       fetchArticles();
-      alert(editingArticle ? 'Article updated successfully!' : 'Article created successfully!');
+      notify('success', editingArticle ? 'Article updated successfully!' : 'Article created successfully!');
     } catch (error) {
       console.error('Error saving article:', error);
-      alert('Error saving article. Please try again.');
+      notify('error', 'Error saving article. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -116,10 +128,10 @@ const HelpManagement: React.FC = () => {
         headers: { Authorization: `Bearer ${token}` }
       });
       fetchArticles();
-      alert('Article deleted successfully!');
+      notify('success', 'Article deleted successfully!');
     } catch (error) {
       console.error('Error deleting article:', error);
-      alert('Error deleting article. Please try again.');
+      notify('error', 'Error deleting article. Please try again.');
     }
   };
 
