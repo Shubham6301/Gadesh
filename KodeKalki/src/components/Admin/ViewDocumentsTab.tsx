@@ -59,12 +59,22 @@ interface Document {
   updatedAt?: string;
 }
 
-interface ViewDocumentsTabProps {}
+interface ViewDocumentsTabProps {
+  showNotification?: (type: 'success' | 'error' | 'info', message: string) => void;
+}
 
-const ViewDocumentsTab: React.FC<ViewDocumentsTabProps> = () => {
+const ViewDocumentsTab: React.FC<ViewDocumentsTabProps> = ({ showNotification }) => {
   
   const { token } = useAuth();
   const { isDark } = useTheme();
+
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; message: string; onConfirm: () => void; }>({ open: false, message: '', onConfirm: () => {} });
+
+  const showConfirm = (message: string, onConfirm: () => void) => setConfirmModal({ open: true, message, onConfirm });
+
+  const notify = (type: 'success' | 'error' | 'info', message: string) => {
+    if (showNotification) showNotification(type, message);
+  };
 
   // State with proper initialization
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -160,7 +170,7 @@ const ViewDocumentsTab: React.FC<ViewDocumentsTabProps> = () => {
   const handleCreateSubject = async () => {
     try {
       if (!newSubject.name.trim()) {
-        alert('Subject name is required');
+        notify('error', 'Subject name is required');
         return;
       }
 
@@ -177,35 +187,34 @@ const ViewDocumentsTab: React.FC<ViewDocumentsTabProps> = () => {
           icon: '📚',
           color: '#3B82F6'
         });
-        alert('Subject created successfully!');
+        notify('success', 'Subject created successfully!');
       } else {
-        alert('Failed to create subject');
+        notify('error', 'Failed to create subject');
       }
     } catch (error: any) {
       console.error('Error creating subject:', error);
-      alert(error.response?.data?.message || 'Failed to create subject');
+      notify('error', error.response?.data?.message || 'Failed to create subject');
     }
   };
 
   // Delete document
-  const handleDeleteDocument = async (id: string, title: string) => {
-    if (window.confirm(`Are you sure you want to delete "${title}"?`)) {
+  const handleDeleteDocument = (id: string, title: string) => {
+    showConfirm(`Are you sure you want to delete "${title}"?`, async () => {
       try {
         const response = await axios.delete(`${API_URL}/documents/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
-        
         if (response.data.success) {
           setDocuments(prev => prev.filter(doc => doc._id !== id));
-          alert('Document deleted successfully!');
+          notify('success', 'Document deleted successfully!');
         } else {
-          alert('Failed to delete document');
+          notify('error', 'Failed to delete document');
         }
       } catch (error: any) {
         console.error('Error deleting document:', error);
-        alert(error.response?.data?.message || 'Failed to delete document');
+        notify('error', error.response?.data?.message || 'Failed to delete document');
       }
-    }
+    });
   };
 
   useEffect(() => {
@@ -717,6 +726,38 @@ const ViewDocumentsTab: React.FC<ViewDocumentsTabProps> = () => {
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg"
               >
                 Create Subject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Confirm Modal */}
+      {confirmModal.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[99999] p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-sm border border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Confirm Delete</h3>
+            </div>
+            <p className="text-gray-600 dark:text-gray-400 mb-6 text-sm">{confirmModal.message}</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setConfirmModal({ open: false, message: '', onConfirm: () => {} })}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  confirmModal.onConfirm();
+                  setConfirmModal({ open: false, message: '', onConfirm: () => {} });
+                }}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+              >
+                Delete
               </button>
             </div>
           </div>
