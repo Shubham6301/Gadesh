@@ -49,7 +49,7 @@ const Announcements: React.FC = () => {
     expiresAt: "",
     pinned: false,
   })
-  const { isDark } = useTheme();
+  const { isDark } = useTheme()
 
   useEffect(() => {
     fetchAnnouncements()
@@ -67,8 +67,7 @@ const Announcements: React.FC = () => {
       const response = await axios.get(`${API_URL}/announcements?${params}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      
-      // Filter out expired announcements
+
       const currentDate = new Date()
       const activeAnnouncements = response.data.filter((ann: Announcement) => {
         if (!ann.isActive) return false
@@ -78,28 +77,26 @@ const Announcements: React.FC = () => {
         }
         return true
       })
-      
-      // Sort by pinned first, then priority/recent
+
       const sortedAnnouncements = activeAnnouncements.sort((a: Announcement, b: Announcement) => {
-        // Pinned announcements first
         if (a.pinned && !b.pinned) return -1
         if (!a.pinned && b.pinned) return 1
-        
-        // Then by sort criteria
+
         if (sortBy === "priority") {
           const priorityOrder = { critical: 4, high: 3, medium: 2, low: 1 }
-          return priorityOrder[b.priority as keyof typeof priorityOrder] - 
-                 priorityOrder[a.priority as keyof typeof priorityOrder]
+          return (
+            priorityOrder[b.priority as keyof typeof priorityOrder] -
+            priorityOrder[a.priority as keyof typeof priorityOrder]
+          )
         }
-        
-        // Default: most recent first
+
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       })
-      
+
       setAnnouncements(sortedAnnouncements)
     } catch (error) {
       console.error("Error fetching announcements:", error)
-      showError('Error fetching announcements')
+      showError("Error fetching announcements")
     } finally {
       setLoading(false)
     }
@@ -108,16 +105,15 @@ const Announcements: React.FC = () => {
   const handleCreateAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user || user.role !== "admin") {
-      showError('Admin access required')
+      showError("Admin access required")
       return
     }
 
     try {
-      // Prepare tags array
       const tagsArray = newAnnouncement.tags
         .split(",")
-        .map(tag => tag.trim())
-        .filter(tag => tag.length > 0)
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0)
 
       const announcementData = {
         title: newAnnouncement.title,
@@ -133,17 +129,13 @@ const Announcements: React.FC = () => {
       }
 
       const token = localStorage.getItem("token")
-      const response = await axios.post(
-        `${API_URL}/announcements`,
-        announcementData,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      )
-      
+      const response = await axios.post(`${API_URL}/announcements`, announcementData, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      })
+
       setAnnouncements([response.data, ...announcements])
       setNewAnnouncement({
         title: "",
@@ -157,29 +149,27 @@ const Announcements: React.FC = () => {
         pinned: false,
       })
       setShowCreateForm(false)
-      showSuccess('Announcement created successfully!')
+      showSuccess("Announcement created successfully!")
     } catch (error: any) {
       console.error("Error creating announcement:", error)
-      showError(error.response?.data?.message || 'Error creating announcement')
+      showError(error.response?.data?.message || "Error creating announcement")
     }
   }
 
   const handleDeleteAnnouncement = async (id: string) => {
     if (!window.confirm("Are you sure you want to delete this announcement?")) return
-    
+
     try {
       const token = localStorage.getItem("token")
       await axios.delete(`${API_URL}/announcements/${id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       })
-      
-      setAnnouncements(announcements.filter(a => a._id !== id))
-      showSuccess('Announcement deleted successfully!')
+
+      setAnnouncements(announcements.filter((a) => a._id !== id))
+      showSuccess("Announcement deleted successfully!")
     } catch (error: any) {
       console.error("Error deleting announcement:", error)
-      showError('Error deleting announcement')
+      showError("Error deleting announcement")
     }
   }
 
@@ -247,14 +237,36 @@ const Announcements: React.FC = () => {
     }
   }
 
-  const filteredAnnouncements = announcements.filter(
-    (announcement) =>
+  // ─── Shared input/select style using isDark ───────────────────────────────
+  const inputClass = `
+    w-full px-3 py-2 rounded-md border text-sm outline-none focus:ring-2 focus:ring-blue-500
+    ${isDark
+      ? "bg-gray-700 border-gray-600 text-white placeholder-gray-400"
+      : "bg-white border-gray-300 text-gray-900 placeholder-gray-400"}
+  `
+
+  const selectClass = `
+    w-full px-3 py-2 rounded-md border text-sm outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer
+    ${isDark
+      ? "bg-gray-700 border-gray-600 text-white"
+      : "bg-white border-gray-300 text-gray-900"}
+  `
+
+  const filteredAnnouncements = announcements.filter((announcement) => {
+    const matchesSearch =
+      !searchTerm ||
       announcement.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       announcement.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (announcement.tags && announcement.tags.some(tag => 
-        tag.toLowerCase().includes(searchTerm.toLowerCase())
-      ))
-  )
+      (announcement.tags &&
+        announcement.tags.some((tag) =>
+          tag.toLowerCase().includes(searchTerm.toLowerCase())
+        ))
+
+    const matchesType = !selectedType || announcement.type === selectedType
+    const matchesPriority = !selectedPriority || announcement.priority === selectedPriority
+
+    return matchesSearch && matchesType && matchesPriority
+  })
 
   const allTypes = ["general", "contest", "maintenance", "feature", "update", "alert"]
   const allPriorities = ["critical", "high", "medium", "low"]
@@ -268,26 +280,42 @@ const Announcements: React.FC = () => {
   }
 
   return (
-    <div className={`min-h-screen transition-colors duration-300 ${isDark ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-900"}`}>
+    <div
+      className={`min-h-screen transition-colors duration-300 ${
+        isDark ? "bg-gray-900 text-white" : "bg-gray-50 text-gray-900"
+      }`}
+    >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="text-3xl font-bold mb-2">Announcements</h1>
-            <p className="text-gray-600 dark:text-gray-400">Stay updated with the latest news and updates</p>
+            <p className={isDark ? "text-gray-400" : "text-gray-600"}>
+              Stay updated with the latest news and updates
+            </p>
           </div>
           {user && user.role === "admin" && (
             <button
               onClick={() => setShowCreateForm(!showCreateForm)}
               className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
             >
-              {showCreateForm ? <X className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
+              {showCreateForm ? (
+                <X className="h-4 w-4 mr-2" />
+              ) : (
+                <Plus className="h-4 w-4 mr-2" />
+              )}
               {showCreateForm ? "Cancel" : "New Announcement"}
             </button>
           )}
         </div>
 
+        {/* Create Form */}
         {showCreateForm && user?.role === "admin" && (
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 mb-8">
+          <div
+            className={`rounded-lg shadow-lg p-6 mb-8 ${
+              isDark ? "bg-gray-800" : "bg-white"
+            }`}
+          >
             <h3 className="text-xl font-semibold mb-4">Create New Announcement</h3>
             <form onSubmit={handleCreateAnnouncement} className="space-y-4">
               <div>
@@ -296,7 +324,7 @@ const Announcements: React.FC = () => {
                   type="text"
                   required
                   placeholder="Announcement title"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                  className={inputClass}
                   value={newAnnouncement.title}
                   onChange={(e) => setNewAnnouncement({ ...newAnnouncement, title: e.target.value })}
                 />
@@ -308,9 +336,11 @@ const Announcements: React.FC = () => {
                   rows={4}
                   required
                   placeholder="Announcement content (supports Markdown)"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                  className={inputClass}
                   value={newAnnouncement.content}
-                  onChange={(e) => setNewAnnouncement({ ...newAnnouncement, content: e.target.value })}
+                  onChange={(e) =>
+                    setNewAnnouncement({ ...newAnnouncement, content: e.target.value })
+                  }
                 />
               </div>
 
@@ -319,8 +349,10 @@ const Announcements: React.FC = () => {
                   <label className="block text-sm font-medium mb-2">Type</label>
                   <select
                     value={newAnnouncement.type}
-                    onChange={(e) => setNewAnnouncement({ ...newAnnouncement, type: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, type: e.target.value })
+                    }
+                    className={selectClass}
                   >
                     <option value="general">General</option>
                     <option value="contest">Contest</option>
@@ -335,8 +367,10 @@ const Announcements: React.FC = () => {
                   <label className="block text-sm font-medium mb-2">Priority</label>
                   <select
                     value={newAnnouncement.priority}
-                    onChange={(e) => setNewAnnouncement({ ...newAnnouncement, priority: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, priority: e.target.value })
+                    }
+                    className={selectClass}
                   >
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -348,13 +382,17 @@ const Announcements: React.FC = () => {
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">Tags (comma-separated)</label>
+                  <label className="block text-sm font-medium mb-2">
+                    Tags (comma-separated)
+                  </label>
                   <input
                     type="text"
                     placeholder="urgent, feature, contest"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                    className={inputClass}
                     value={newAnnouncement.tags}
-                    onChange={(e) => setNewAnnouncement({ ...newAnnouncement, tags: e.target.value })}
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, tags: e.target.value })
+                    }
                   />
                 </div>
 
@@ -363,9 +401,11 @@ const Announcements: React.FC = () => {
                   <input
                     type="url"
                     placeholder="https://example.com/image.jpg"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                    className={inputClass}
                     value={newAnnouncement.imageUrl}
-                    onChange={(e) => setNewAnnouncement({ ...newAnnouncement, imageUrl: e.target.value })}
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, imageUrl: e.target.value })
+                    }
                   />
                 </div>
               </div>
@@ -376,9 +416,11 @@ const Announcements: React.FC = () => {
                   <input
                     type="url"
                     placeholder="https://example.com/more-info"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                    className={inputClass}
                     value={newAnnouncement.link}
-                    onChange={(e) => setNewAnnouncement({ ...newAnnouncement, link: e.target.value })}
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, link: e.target.value })
+                    }
                   />
                 </div>
 
@@ -386,19 +428,23 @@ const Announcements: React.FC = () => {
                   <label className="block text-sm font-medium mb-2">Expires At</label>
                   <input
                     type="datetime-local"
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
+                    className={inputClass}
                     value={newAnnouncement.expiresAt}
-                    onChange={(e) => setNewAnnouncement({ ...newAnnouncement, expiresAt: e.target.value })}
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, expiresAt: e.target.value })
+                    }
                   />
                 </div>
               </div>
 
               <div className="flex items-center space-x-4">
-                <label className="flex items-center">
+                <label className="flex items-center cursor-pointer">
                   <input
                     type="checkbox"
                     checked={newAnnouncement.pinned}
-                    onChange={(e) => setNewAnnouncement({ ...newAnnouncement, pinned: e.target.checked })}
+                    onChange={(e) =>
+                      setNewAnnouncement({ ...newAnnouncement, pinned: e.target.checked })
+                    }
                     className="mr-2"
                   />
                   <span className="text-sm">Pin to top</span>
@@ -415,7 +461,11 @@ const Announcements: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setShowCreateForm(false)}
-                  className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  className={`px-4 py-2 border rounded-md transition-colors ${
+                    isDark
+                      ? "border-gray-600 hover:bg-gray-700"
+                      : "border-gray-300 hover:bg-gray-100"
+                  }`}
                 >
                   Cancel
                 </button>
@@ -424,89 +474,189 @@ const Announcements: React.FC = () => {
           </div>
         )}
 
-        {/* Filters */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6 grid grid-cols-1 md:grid-cols-5 gap-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Search announcements..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-          <select
-            value={selectedType}
-            onChange={(e) => setSelectedType(e.target.value)}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
-          >
-            <option value="">All Types</option>
-            {allTypes.map((type) => (
-              <option key={type} value={type}>
-                {type.charAt(0).toUpperCase() + type.slice(1)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={selectedPriority}
-            onChange={(e) => setSelectedPriority(e.target.value)}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
-          >
-            <option value="">All Priorities</option>
-            {allPriorities.map((priority) => (
-              <option key={priority} value={priority}>
-                {priority.charAt(0).toUpperCase() + priority.slice(1)}
-              </option>
-            ))}
-          </select>
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as "recent" | "priority")}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 rounded-md"
-          >
-            <option value="recent">Most Recent</option>
-            <option value="priority">By Priority</option>
-          </select>
-          <button
-            onClick={() => {
-              setSelectedType("")
-              setSelectedPriority("")
-              setSearchTerm("")
-              setSortBy("recent")
+        {/* ─── Filters ───────────────────────────────────────────────────────── */}
+        <div
+          style={{
+            background: isDark ? "#1f2937" : "#ffffff",
+            borderRadius: "0.5rem",
+            padding: "1rem",
+            marginBottom: "1.5rem",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0.75rem",
+              alignItems: "center",
             }}
-            className="px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
           >
-            Clear Filters
-          </button>
+            {/* Search */}
+            <div style={{ position: "relative", flex: "1 1 200px", minWidth: "0" }}>
+              <Search
+                style={{
+                  position: "absolute",
+                  left: "0.75rem",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: "1rem",
+                  height: "1rem",
+                  color: "#9ca3af",
+                  pointerEvents: "none",
+                }}
+              />
+              <input
+                type="text"
+                placeholder="Search announcements..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  width: "100%",
+                  paddingLeft: "2.25rem",
+                  paddingRight: "1rem",
+                  paddingTop: "0.5rem",
+                  paddingBottom: "0.5rem",
+                  borderRadius: "0.375rem",
+                  border: `1px solid ${isDark ? "#4b5563" : "#d1d5db"}`,
+                  background: isDark ? "#374151" : "#ffffff",
+                  color: isDark ? "#ffffff" : "#111827",
+                  fontSize: "0.875rem",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+
+            {/* Type */}
+            <select
+              value={selectedType}
+              onChange={(e) => setSelectedType(e.target.value)}
+              style={{
+                flex: "0 1 140px",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.375rem",
+                border: `1px solid ${isDark ? "#4b5563" : "#d1d5db"}`,
+                background: isDark ? "#374151" : "#ffffff",
+                color: isDark ? "#ffffff" : "#111827",
+                fontSize: "0.875rem",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              <option value="">All Types</option>
+              {allTypes.map((type) => (
+                <option key={type} value={type}>
+                  {type.charAt(0).toUpperCase() + type.slice(1)}
+                </option>
+              ))}
+            </select>
+
+            {/* Priority */}
+            <select
+              value={selectedPriority}
+              onChange={(e) => setSelectedPriority(e.target.value)}
+              style={{
+                flex: "0 1 150px",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.375rem",
+                border: `1px solid ${isDark ? "#4b5563" : "#d1d5db"}`,
+                background: isDark ? "#374151" : "#ffffff",
+                color: isDark ? "#ffffff" : "#111827",
+                fontSize: "0.875rem",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              <option value="">All Priorities</option>
+              {allPriorities.map((priority) => (
+                <option key={priority} value={priority}>
+                  {priority.charAt(0).toUpperCase() + priority.slice(1)}
+                </option>
+              ))}
+            </select>
+
+            {/* Sort */}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as "recent" | "priority")}
+              style={{
+                flex: "0 1 150px",
+                padding: "0.5rem 0.75rem",
+                borderRadius: "0.375rem",
+                border: `1px solid ${isDark ? "#4b5563" : "#d1d5db"}`,
+                background: isDark ? "#374151" : "#ffffff",
+                color: isDark ? "#ffffff" : "#111827",
+                fontSize: "0.875rem",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              <option value="recent">Most Recent</option>
+              <option value="priority">By Priority</option>
+            </select>
+
+            {/* Clear */}
+            <button
+              onClick={() => {
+                setSelectedType("")
+                setSelectedPriority("")
+                setSearchTerm("")
+                setSortBy("recent")
+              }}
+              style={{
+                flex: "0 0 auto",
+                padding: "0.5rem 1rem",
+                background: "#4b5563",
+                color: "#ffffff",
+                borderRadius: "0.375rem",
+                border: "none",
+                fontSize: "0.875rem",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#374151")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#4b5563")}
+            >
+              Clear Filters
+            </button>
+          </div>
         </div>
 
         {/* Announcements List */}
         <div className="space-y-6">
           {filteredAnnouncements.map((announcement) => (
-            <div 
-              key={announcement._id} 
-              className={`bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm hover:shadow-md transition-shadow ${
-                announcement.pinned ? "border-l-4 border-yellow-500" : ""
-              }`}
+            <div
+              key={announcement._id}
+              className={`p-6 rounded-lg shadow-sm hover:shadow-md transition-shadow ${
+                isDark ? "bg-gray-800" : "bg-white"
+              } ${announcement.pinned ? "border-l-4 border-yellow-500" : ""}`}
             >
               <div className="flex justify-between items-start">
                 <div className="flex-1">
-                  <div className="flex items-center mb-3">
-                    <div className="flex items-center mr-3">
+                  <div className="flex items-center flex-wrap gap-2 mb-3">
+                    <div className="flex items-center">
                       {getTypeIcon(announcement.type)}
-                      <span className={`ml-1 px-2 py-1 rounded-full text-xs font-medium ${getTypeColor(announcement.type)}`}>
+                      <span
+                        className={`ml-1 px-2 py-1 rounded-full text-xs font-medium ${getTypeColor(
+                          announcement.type
+                        )}`}
+                      >
                         {announcement.type.charAt(0).toUpperCase() + announcement.type.slice(1)}
                       </span>
                     </div>
                     <div className="flex items-center">
                       {getPriorityIcon(announcement.priority)}
-                      <span className={`ml-1 px-2 py-1 rounded-full text-xs font-medium border ${getPriorityColor(announcement.priority)}`}>
+                      <span
+                        className={`ml-1 px-2 py-1 rounded-full text-xs font-medium border ${getPriorityColor(
+                          announcement.priority
+                        )}`}
+                      >
                         {announcement.priority.toUpperCase()}
                       </span>
                     </div>
                     {announcement.pinned && (
-                      <span className="ml-2 px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-800 text-xs rounded-full">
                         Pinned
                       </span>
                     )}
@@ -514,24 +664,22 @@ const Announcements: React.FC = () => {
 
                   <div className="mb-4">
                     <h2 className="text-xl font-semibold mb-2">{announcement.title}</h2>
-                    <div className="prose dark:prose-invert max-w-none">
-                      <p className="text-gray-700 dark:text-gray-300">
-                        {announcement.content.length > 300
-                          ? `${announcement.content.substring(0, 300)}...`
-                          : announcement.content}
-                      </p>
-                    </div>
+                    <p className={isDark ? "text-gray-300" : "text-gray-700"}>
+                      {announcement.content.length > 300
+                        ? `${announcement.content.substring(0, 300)}...`
+                        : announcement.content}
+                    </p>
                   </div>
 
                   {announcement.imageUrl && (
                     <div className="mb-4">
-                      <img 
-                        src={announcement.imageUrl} 
+                      <img
+                        src={announcement.imageUrl}
                         alt={announcement.title}
                         className="w-full max-h-64 object-cover rounded-lg"
                         onError={(e) => {
                           const target = e.target as HTMLImageElement
-                          target.style.display = 'none'
+                          target.style.display = "none"
                         }}
                       />
                     </div>
@@ -540,9 +688,13 @@ const Announcements: React.FC = () => {
                   {announcement.tags && announcement.tags.length > 0 && (
                     <div className="flex flex-wrap gap-2 mb-4">
                       {announcement.tags.map((tag, index) => (
-                        <span 
-                          key={index} 
-                          className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs rounded"
+                        <span
+                          key={index}
+                          className={`px-2 py-1 text-xs rounded ${
+                            isDark
+                              ? "bg-gray-700 text-gray-300"
+                              : "bg-gray-100 text-gray-600"
+                          }`}
                         >
                           {tag}
                         </span>
@@ -550,7 +702,11 @@ const Announcements: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="flex items-center justify-between mt-4 text-sm text-gray-500">
+                  <div
+                    className={`flex items-center justify-between mt-4 text-sm ${
+                      isDark ? "text-gray-400" : "text-gray-500"
+                    }`}
+                  >
                     <div className="flex items-center space-x-4">
                       <div className="flex items-center">
                         <User className="h-4 w-4 mr-1" />
@@ -561,12 +717,12 @@ const Announcements: React.FC = () => {
                         <span>{new Date(announcement.createdAt).toLocaleDateString()}</span>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center space-x-4">
                       {announcement.link && (
-                        <a 
-                          href={announcement.link} 
-                          target="_blank" 
+                        <a
+                          href={announcement.link}
+                          target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:text-blue-700 font-medium"
                         >
@@ -590,7 +746,7 @@ const Announcements: React.FC = () => {
         </div>
 
         {filteredAnnouncements.length === 0 && !loading && (
-          <div className="text-center py-12 text-gray-600 dark:text-gray-400">
+          <div className={`text-center py-12 ${isDark ? "text-gray-400" : "text-gray-600"}`}>
             <Megaphone className="mx-auto h-12 w-12 mb-4 text-gray-400" />
             <p className="text-lg font-medium mb-2">No announcements found</p>
             <p>Check back later for updates and news.</p>
