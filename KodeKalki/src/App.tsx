@@ -42,6 +42,9 @@ import { Toaster } from 'react-hot-toast';
 import { useEffect, useState } from "react";
 import { Trophy } from "lucide-react";
 import Help from './pages/HelpPage';
+import PrivacyPolicy from './pages/PrivacyPolicy';
+import TermsOfService from './pages/TermsOfService';
+import CookiePolicy from './pages/CookiePolicy';
 import HelpArticle from './pages/HelpArticleDetail';
 // ✅ NEW: Wrapper component for EditDocumentTab to extract URL params
 const EditDocumentWrapper = () => {
@@ -653,6 +656,9 @@ const AppRoutes = () => {
             <Route path="/oauth" element={<OAuthHandler />} />
             <Route path="/search" element={<ProfileSearch />} />
             <Route path="/profile/:username" element={<UserProfile />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="/terms-of-service" element={<TermsOfService />} />
+            <Route path="/cookie-policy" element={<CookiePolicy />} />
           </Routes>
         </div>
       </div>
