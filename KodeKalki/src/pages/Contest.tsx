@@ -9,6 +9,21 @@ import axios from "axios"
 import { Trophy, Users, Calendar, Star, Play, Award, Eye, Timer } from "lucide-react"
 import { API_URL } from "../config/api"
 
+interface ContestProblem {
+  _id: string
+  title?: string
+  difficulty?: string
+  score?: number
+  tags?: string[]
+  // nested format fallback
+  problem?: {
+    _id: string
+    title: string
+    difficulty: string
+    tags?: string[]
+  }
+}
+
 interface Contest {
   _id: string
   name: string
@@ -17,11 +32,7 @@ interface Contest {
   startTime: string
   endTime: string
   duration: number
-  problems: {
-    _id: string
-    title: string
-    difficulty: string
-  }[]
+  problems: ContestProblem[]
   participants: {
     user: {
       _id: string
@@ -34,6 +45,26 @@ interface Contest {
   createdBy: {
     username: string
   }
+}
+
+// ✅ Helper — problem title safely nikalo (nested ya flat dono handle)
+const getProblemTitle = (p: ContestProblem, index: number): string => {
+  if (p.title && p.title !== "Untitled") return p.title
+  if (p.problem?.title) return p.problem.title
+  return `Problem ${index + 1}`
+}
+
+const getProblemDifficulty = (p: ContestProblem): string => {
+  if (p.difficulty) return p.difficulty
+  if (p.problem?.difficulty) return p.problem.difficulty
+  return "Medium"
+}
+
+// ✅ Tags helper — topics field se tags nikalo
+const getProblemTags = (p: ContestProblem): string[] => {
+  if (p.tags && p.tags.length > 0) return p.tags
+  if (p.problem?.tags && p.problem.tags.length > 0) return p.problem.tags
+  return []
 }
 
 // Custom Card Components
@@ -134,10 +165,15 @@ const Contest: React.FC = () => {
   const [contests, setContests] = useState<Contest[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState("all")
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
 
   useEffect(() => {
     fetchContests()
-    // Update contest statuses every minute
     const interval = setInterval(fetchContests, 60000)
     return () => clearInterval(interval)
   }, [])
@@ -145,7 +181,6 @@ const Contest: React.FC = () => {
   const fetchContests = async () => {
     try {
       const response = await axios.get(`${API_URL}/contests`)
-      // Update contest statuses based on current time
       const updatedContests = response.data.map((contest: Contest) => ({
         ...contest,
         status: getActualContestStatus(contest.startTime, contest.endTime),
@@ -158,19 +193,13 @@ const Contest: React.FC = () => {
     }
   }
 
-  // Function to determine actual contest status based on current time
   const getActualContestStatus = (startTime: string, endTime: string): string => {
     const now = new Date()
     const start = new Date(startTime)
     const end = new Date(endTime)
-
-    if (now < start) {
-      return "upcoming"
-    } else if (now >= start && now <= end) {
-      return "ongoing"
-    } else {
-      return "ended"
-    }
+    if (now < start) return "upcoming"
+    else if (now >= start && now <= end) return "ongoing"
+    else return "ended"
   }
 
   const registerForContest = async (contestId: string) => {
@@ -180,9 +209,17 @@ const Contest: React.FC = () => {
         headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
       })
       fetchContests()
-      alert("Successfully registered for contest!")
+      showToast("✅ Successfully registered for contest!")
     } catch (error: any) {
-      alert(error.response?.data?.message || "Registration failed")
+      if (error.response?.status === 403 && error.response?.data?.banned) {
+        showToast("🚫 Your account has been permanently banned due to plagiarism.", 'error')
+      } else if (error.response?.status === 403 && error.response?.data?.contestPermanentBanned) {
+        showToast("🚫 You are permanently banned from all contests due to repeated plagiarism.", 'error')
+      } else if (error.response?.status === 403 && error.response?.data?.contestBanned) {
+        showToast("🚫 You have been banned from this specific contest due to plagiarism.", 'error')
+      } else {
+        showToast(error.response?.data?.message || "Registration failed", 'error')
+      }
     }
   }
 
@@ -204,59 +241,43 @@ const Contest: React.FC = () => {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "upcoming":
-        return "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:border-blue-700"
-      case "ongoing":
-        return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900 dark:text-green-200 dark:border-green-700"
-      case "ended":
-        return "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
-      default:
-        return "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
+      case "upcoming": return "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900 dark:text-blue-200 dark:border-blue-700"
+      case "ongoing": return "bg-green-100 text-green-800 border-green-200 dark:bg-green-900 dark:text-green-200 dark:border-green-700"
+      case "ended": return "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
+      default: return "bg-gray-100 text-gray-800 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
     }
   }
 
   const getTimeRemaining = (startTime: string, endTime: string, status: string) => {
     const now = new Date()
-
     if (status === "upcoming") {
       const start = new Date(startTime)
       const diff = start.getTime() - now.getTime()
-
       if (diff <= 0) return "Starting now"
-
       const days = Math.floor(diff / (1000 * 60 * 60 * 24))
       const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-
       if (days > 0) return `${days}d ${hours}h ${minutes}m`
       if (hours > 0) return `${hours}h ${minutes}m`
       return `${minutes}m`
     } else if (status === "ongoing") {
       const end = new Date(endTime)
       const diff = end.getTime() - now.getTime()
-
       if (diff <= 0) return "Ending now"
-
       const hours = Math.floor(diff / (1000 * 60 * 60))
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-
       if (hours > 0) return `${hours}h ${minutes}m left`
       return `${minutes}m left`
     }
-
     return ""
   }
 
   const getDifficultyColor = (difficulty?: string) => {
     switch (difficulty) {
-      case "Easy":
-        return "bg-green-100 text-green-700 border-green-200 dark:bg-green-900 dark:text-green-200 dark:border-green-700"
-      case "Medium":
-        return "bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900 dark:text-yellow-200 dark:border-yellow-700"
-      case "Hard":
-        return "bg-red-100 text-red-700 border-red-200 dark:bg-red-900 dark:text-red-200 dark:border-red-700"
-      default:
-        return "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
+      case "Easy": return "bg-green-100 text-green-700 border-green-200 dark:bg-green-900 dark:text-green-200 dark:border-green-700"
+      case "Medium": return "bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-900 dark:text-yellow-200 dark:border-yellow-700"
+      case "Hard": return "bg-red-100 text-red-700 border-red-200 dark:bg-red-900 dark:text-red-200 dark:border-red-700"
+      default: return "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:border-gray-600"
     }
   }
 
@@ -312,6 +333,17 @@ const Contest: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-gray-900 dark:to-slate-900">
+
+      {toast && (
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[9999] flex items-center gap-3 px-6 py-4 rounded-xl shadow-2xl border backdrop-blur-sm ${
+          toast.type === 'success'
+            ? 'bg-green-500/90 border-green-400 text-white'
+            : 'bg-red-500/90 border-red-400 text-white'
+        }`}>
+          <span className="text-base font-semibold">{toast.message}</span>
+        </div>
+      )}
+
       <div className="max-w-7xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-6 sm:py-8">
         {/* Header */}
         <div className="text-center mb-8 sm:mb-12">
@@ -359,15 +391,13 @@ const Contest: React.FC = () => {
         {/* Contests Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-8">
           {filteredContests.map((contest) => {
-            // Get actual status for each contest
             const actualStatus = getActualContestStatus(contest.startTime, contest.endTime)
             const userRegistered = isUserRegistered(contest)
 
             return (
-              <Card 
-                key={contest._id} 
+              <Card
+                key={contest._id}
                 className="overflow-hidden group cursor-pointer"
-                // onClick={() => handleViewContestDetails(contest._id)}
               >
                 {/* Banner Image */}
                 <div className="relative h-36 sm:h-48 bg-gradient-to-br from-blue-600 to-purple-700 overflow-hidden">
@@ -437,24 +467,42 @@ const Contest: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Problems Preview - UNLOCKED */}
+                  {/* ✅ Problems Preview — tags dikhao (Array, Tree, DP etc.) */}
                   {contest.problems.length > 0 && (
                     <div>
-                      <p className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1 sm:mb-2">Problems:</p>
+                      <p className="text-xs sm:text-sm font-semibold text-gray-700 dark:text-gray-200 mb-1 sm:mb-2">
+                        Problems: <span className="font-normal text-gray-500 dark:text-gray-400">{contest.problems.length} total</span>
+                      </p>
                       <div className="flex flex-wrap gap-1 sm:gap-1.5">
-                        {contest.problems.slice(0, 3).map((problemObj, index) => (
-                          <Badge 
-                            key={index} 
-                            className={`${getDifficultyColor(problemObj.difficulty)} text-[10px] sm:text-xs`}
-                          >
-                            {problemObj.title || "Untitled"}
-                          </Badge>
-                        ))}
-                        {contest.problems.length > 3 && (
-                          <Badge variant="outline" className="text-[10px] sm:text-xs">
-                            +{contest.problems.length - 3} more
-                          </Badge>
-                        )}
+                        {(() => {
+                          const allTags = contest.problems.flatMap((p) => getProblemTags(p))
+                          const uniqueTags = [...new Set(allTags)]
+                          if (uniqueTags.length > 0) {
+                            return (
+                              <>
+                                {uniqueTags.slice(0, 4).map((tag, i) => (
+                                  <Badge key={i} variant="secondary" className="text-[10px] sm:text-xs">
+                                    {tag}
+                                  </Badge>
+                                ))}
+                                {uniqueTags.length > 4 && (
+                                  <Badge variant="outline" className="text-[10px] sm:text-xs">
+                                    +{uniqueTags.length - 4} more
+                                  </Badge>
+                                )}
+                              </>
+                            )
+                          }
+                          // Tags nahi hain toh difficulty dikhao fallback
+                          return contest.problems.slice(0, 3).map((problemObj, index) => (
+                            <Badge
+                              key={index}
+                              className={`${getDifficultyColor(getProblemDifficulty(problemObj))} text-[10px] sm:text-xs`}
+                            >
+                              {getProblemDifficulty(problemObj)}
+                            </Badge>
+                          ))
+                        })()}
                       </div>
                     </div>
                   )}
@@ -515,10 +563,8 @@ const Contest: React.FC = () => {
                 </CardContent>
 
                 <CardFooter className="pt-0">
-                  {/* Action Buttons */}
                   {user ? (
                     <>
-                      {/* Upcoming Contest - Show Register/Registered */}
                       {actualStatus === "upcoming" && (
                         <Button
                           onClick={(e) => {
@@ -531,19 +577,12 @@ const Contest: React.FC = () => {
                           size="lg"
                         >
                           {userRegistered ? (
-                            <>
-                              <Trophy className="h-5 w-5 mr-2" />
-                              Registered ✓
-                            </>
+                            <><Trophy className="h-5 w-5 mr-2" />Registered ✓</>
                           ) : (
-                            <>
-                              <Calendar className="h-5 w-5 mr-2" />
-                              Register Now
-                            </>
+                            <><Calendar className="h-5 w-5 mr-2" />Register Now</>
                           )}
                         </Button>
                       )}
-                      {/* Ongoing Contest - Show Enter Contest or Registration Closed */}
                       {actualStatus === "ongoing" && (
                         <>
                           {userRegistered ? (
@@ -574,16 +613,14 @@ const Contest: React.FC = () => {
                           )}
                         </>
                       )}
-
-                      {/* Ended Contest - Show View Results */}
                       {actualStatus === "ended" && (
-                        <Button 
+                        <Button
                           onClick={(e) => {
                             e.stopPropagation()
                             handleEnterContest(contest._id)
-                          }} 
-                          className="w-full" 
-                          variant="secondary" 
+                          }}
+                          className="w-full"
+                          variant="secondary"
                           size="lg"
                         >
                           <Eye className="h-5 w-5 mr-2" />
@@ -592,14 +629,13 @@ const Contest: React.FC = () => {
                       )}
                     </>
                   ) : (
-                    /* Not logged in */
-                    <Button 
+                    <Button
                       onClick={(e) => {
                         e.stopPropagation()
                         navigate('/login')
                       }}
-                      className="w-full" 
-                      variant="outline" 
+                      className="w-full"
+                      variant="outline"
                       size="lg"
                     >
                       {actualStatus === "upcoming" ? "Login to Register" : "Login Required"}
@@ -618,8 +654,8 @@ const Contest: React.FC = () => {
               <Trophy className="h-10 w-10 sm:h-16 sm:w-16 text-gray-400 dark:text-gray-600 mx-auto mb-2 sm:mb-4" />
               <h3 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white mb-1 sm:mb-2">No contests found</h3>
               <p className="text-xs sm:text-base text-gray-600 dark:text-gray-400">
-                {filter === "all" 
-                  ? "There are no contests available at the moment. Check back later!" 
+                {filter === "all"
+                  ? "There are no contests available at the moment. Check back later!"
                   : `There are no ${filter} contests currently.`}
               </p>
             </div>
