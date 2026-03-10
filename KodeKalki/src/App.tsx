@@ -46,6 +46,9 @@ import PrivacyPolicy from './pages/PrivacyPolicy';
 import TermsOfService from './pages/TermsOfService';
 import CookiePolicy from './pages/CookiePolicy';
 import HelpArticle from './pages/HelpArticleDetail';
+// ✅ Network Status Toast
+import NetworkStatusToast from './components/NetworkStatusToast';
+
 // ✅ NEW: Wrapper component for EditDocumentTab to extract URL params
 const EditDocumentWrapper = () => {
   const { documentId } = useParams<{ documentId: string }>();
@@ -674,6 +677,8 @@ function App() {
         <NotificationProvider>
           <AppRoutes />
           <Toaster position="bottom-right" />
+          {/* 🌐 Network Status Toast — offline/online popup */}
+          <NetworkStatusToast />
         </NotificationProvider>
       </AuthProvider>
     </ThemeProvider>
