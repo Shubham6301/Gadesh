@@ -1529,7 +1529,7 @@ const AdminDashboard: React.FC = () => {
                       <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                         {users.length === 0 ? (
                           <tr>
-                            <td colSpan={5} className="text-center py-8 text-gray-400">No users found.</td>
+                            <td colSpan={6} className="text-center py-8 text-gray-400">No users found.</td>
                           </tr>
                         ) : (
                           users.map((user) => {
