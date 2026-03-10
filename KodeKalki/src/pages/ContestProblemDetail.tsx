@@ -430,13 +430,6 @@ const fetchContest = async () => {
       
       if (response.data.status === 'Accepted' && response.data.passedTests === response.data.totalTests) {
         console.log('🎉 All test cases passed, updating contest score...');
-        console.log('📊 Submission details for contest update:', {
-          contestId,
-          problemId,
-          passedTests: response.data.passedTests,
-          totalTests: response.data.totalTests,
-          timeSubmitted: new Date().toISOString()
-        });
         try {
           const contestResponse = await axios.post(
             `${API_URL}/contests/${contestId}/submit/${problemId}`,
@@ -444,7 +437,9 @@ const fetchContest = async () => {
               score: 100,
               timeSubmitted: new Date().toISOString(),
               passedTests: response.data.passedTests,
-              totalTests: response.data.totalTests
+              totalTests: response.data.totalTests,
+              code: code,          // ✅ ADDED
+              language: language,  // ✅ ADDED
             },
             {
               headers: { 
@@ -454,8 +449,6 @@ const fetchContest = async () => {
             }
           );
           console.log('✅ Contest score updated:', contestResponse.data);
-          
-          // Show success card instead of alert
           showResultCardWithData({
             type: 'success',
             title: '🎉 Congratulations!',
@@ -468,7 +461,6 @@ const fetchContest = async () => {
           });
         } catch (contestError) {
           console.error('❌ Error updating contest score:', contestError);
-          // Show success card even if score update failed
           showResultCardWithData({
             type: 'success',
             title: '🎉 Problem Solved!',
@@ -485,8 +477,31 @@ const fetchContest = async () => {
           passedTests: response.data.passedTests,
           totalTests: response.data.totalTests
         });
-        
-        // Show failure card
+
+        // ✅ ADDED — wrong answer pe bhi code save karo plagiarism ke liye
+        try {
+          await axios.post(
+            `${API_URL}/contests/${contestId}/submit/${problemId}`,
+            {
+              score: 0,
+              timeSubmitted: new Date().toISOString(),
+              passedTests: response.data.passedTests,
+              totalTests: response.data.totalTests,
+              code: code,          // ✅ ADDED
+              language: language,  // ✅ ADDED
+            },
+            {
+              headers: { 
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          console.log('✅ Wrong answer code saved for plagiarism check');
+        } catch (err) {
+          console.log('⚠️ Wrong answer code save skipped:', err);
+        }
+
         showResultCardWithData({
           type: 'failure',
           title: '❌ Try Again',
@@ -518,7 +533,7 @@ const fetchContest = async () => {
       setSubmitting(false)
     }
   }
-
+  
   const getDifficultyColor = (difficulty: string) => {
     switch (difficulty) {
       case "Easy":
@@ -1030,7 +1045,7 @@ const fetchContest = async () => {
                   )}
                   {submitting && (
                     <div className="text-center py-16 text-gray-600 dark:text-gray-400">
-                      <div className="animate-bounce-slow rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent mx-auto mb-4"></div>
+                      <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-500 border-t-transparent mx-auto mb-4"></div>
                       <p className="font-semibold text-lg dark:text-gray-400">Submitting solution...</p>
                       <p className="text-sm mt-2 text-gray-500">Evaluating against all test cases.</p>
                     </div>
