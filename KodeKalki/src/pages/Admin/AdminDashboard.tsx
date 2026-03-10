@@ -9,11 +9,12 @@ import ViewDocumentsTab from "../../components/Admin/ViewDocumentsTab";
 import AddDocumentTab from "../../components/Admin/AddDocumentTab";
 import HelpManagement from '../../components/Admin/HelpAdminPanel';
 import NotificationsAdminTab from '../../components/Admin/NotificationsAdminTab'; // 🔔
-
+import PlagiarismAdminPanel from '../../components/Admin/PlagiarismAdminPanel';
 import {
   Plus,
   Edit,
   Trash2,
+  Search,
   Users,
   Trophy,
   MessageSquare,
@@ -40,6 +41,10 @@ import {
   XCircle,
   CheckCircle,
   Bell,
+  Shield,
+  AlertTriangle,
+  Ban,
+  UserCheck,
 } from "lucide-react";
 
 interface MCQQuestion {
@@ -194,11 +199,29 @@ interface User {
   role?: string;
   createdAt?: string;
   profile?: UserProfile;
+  isBanned?: boolean;
+  bannedReason?: string;
+  plagiarismWarnings?: any[];
+  contestPermanentBan?: boolean;
+  contestPermanentBanAt?: string;
+  contestPermanentBanReason?: string;
+  contestBans?: {
+    _id?: string;
+    contestId: string;
+    reason: string;
+    similarity: number;
+    matchedWithUser?: string;
+    bannedAt: string;
+    unbannedAt?: string;
+    isActive: boolean;
+    
+  }[];
 }
 
 const AdminDashboard: React.FC = () => {
   const { user } = useAuth();
   const { isDark } = useTheme();
+
   const [activeTab, setActiveTab] = useState("overview");
   const [problems, setProblems] = useState<Problem[]>([]);
   const [contests, setContests] = useState<Contest[]>([]);
@@ -222,6 +245,20 @@ const AdminDashboard: React.FC = () => {
     type: "success" | "error" | "info";
     message: string;
   } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ open: false, title: '', message: '', onConfirm: () => {} });
+
+  const showConfirm = (title: string, message: string, onConfirm: () => void) => {
+    setConfirmModal({ open: true, title, message, onConfirm });
+  };
+const [contestBanPermanent, setContestBanPermanent] = useState(false);
+const [mcqSearchQuery, setMcqSearchQuery] = useState("");
+const [mcqCurrentPage, setMcqCurrentPage] = useState(1);
+const MCQ_PER_PAGE = 10;  const closeConfirm = () => setConfirmModal({ open: false, title: '', message: '', onConfirm: () => {} });
   const [users, setUsers] = useState<User[]>([]);
   const [showCreateUser, setShowCreateUser] = useState(false);
   const [editCancelReason, setEditCancelReason] = useState("");
@@ -285,8 +322,28 @@ const AdminDashboard: React.FC = () => {
       { language: "c", completeCode: "" },
     ],
   });
+// ✅ Block/Unblock states
+const [blockModal, setBlockModal] = useState<{ open: boolean; userId: string | null }>({ open: false, userId: null });
+const [blockReason, setBlockReason] = useState("");
 
-  const [newContest, setNewContest] = useState({
+// ✅ Contest Ban states
+const [contestBanModal, setContestBanModal] = useState<{ open: boolean; userId: string | null; username: string }>({ open: false, userId: null, username: "" });
+const [contestBanContestId, setContestBanContestId] = useState("");
+const [contestBanSimilarity, setContestBanSimilarity] = useState(80);
+const [contestBanMatchedUser, setContestBanMatchedUser] = useState("");
+const [contestBanProblemId, setContestBanProblemId] = useState("");
+const [userSearchQuery, setUserSearchQuery] = useState("");
+const [userCurrentPage, setUserCurrentPage] = useState(1);
+const USERS_PER_PAGE = 10;
+
+const [problemSearchQuery, setProblemSearchQuery] = useState("");
+const [problemCurrentPage, setProblemCurrentPage] = useState(1);
+const PROBLEMS_PER_PAGE = 10;
+
+// ✅ User Detail Modal
+const [viewUserModal, setViewUserModal] = useState<{ open: boolean; user: User | null }>({ open: false, user: null });
+// Line ~235 ke aaspaas
+const [activeUserTab, setActiveUserTab] = useState<"info" | "contestBans" | "plagiarism" | "plagiarismCases">("info");  const [newContest, setNewContest] = useState({
     name: "",
     description: "",
     bannerImage: "",
@@ -422,7 +479,7 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleDeleteUser = async (userId: string) => {
-    if (!confirm("Are you sure you want to delete this user?")) return;
+    showConfirm("Delete User", "Are you sure you want to delete this user? This action cannot be undone.", async () => {
     try {
       const token = localStorage.getItem("token");
       await axios.delete(`${API_URL}/users/${userId}`, {
@@ -433,7 +490,162 @@ const AdminDashboard: React.FC = () => {
     } catch (error) {
       showNotification("error", "Failed to delete user.");
     }
+  });
   };
+const handleBlockUser = async () => {
+  if (!blockModal.userId) return;
+  try {
+    const token = localStorage.getItem("token");
+    await axios.patch(
+      `${API_URL}/users/${blockModal.userId}/block`,
+      { reason: blockReason || "Blocked by admin" },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    // ✅ Optimistic update
+    setUsers(prev => prev.map((u) =>
+      u._id === blockModal.userId
+        ? { ...u, isBanned: true, bannedReason: blockReason || "Blocked by admin" }
+        : u
+    ));
+    showNotification("success", "User blocked successfully!");
+    setBlockModal({ open: false, userId: null });
+    setBlockReason("");
+  } catch (error: any) {
+    showNotification("error", error.response?.data?.message || "Failed to block user.");
+  }
+};
+
+const handleUnblockUser = async (userId: string) => {
+  try {
+    const token = localStorage.getItem("token");
+    await axios.patch(
+      `${API_URL}/users/${userId}/unblock`,
+      {},
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    // ✅ Optimistic update — turant button change hoga
+    setUsers(prev => prev.map((u) =>
+      u._id === userId ? { ...u, isBanned: false, bannedReason: "" } : u
+    ));
+    showNotification("success", "User unblocked successfully!");
+  } catch (error: any) {
+    showNotification("error", "Failed to unblock user.");
+  }
+};
+
+const handleContestBanUser = async () => {
+  if (!contestBanModal.userId || !contestBanContestId) return;
+  try {
+    const token = localStorage.getItem("token");
+    const response = await axios.patch(
+      `${API_URL}/users/${contestBanModal.userId}/contest-block`,
+      {
+        contestId: contestBanContestId,
+        similarity: contestBanSimilarity,
+        matchedWithUser: contestBanMatchedUser || undefined,
+        problemId: contestBanProblemId || undefined,
+        forcePermanentContestBan: contestBanPermanent, // ✅ NEW
+      },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    const data = response.data;
+
+    if (data.permanentContestBan) {
+      showNotification("error", `🚫 User PERMANENTLY banned from ALL contests! ${contestBanPermanent ? '(Admin forced)' : `2nd offense`} (${contestBanSimilarity}% similarity).`);
+    } else {
+      showNotification("success", `⚠️ 1st Warning! User banned from this contest (${contestBanSimilarity}% similarity). One more = permanent contest ban.`);
+    }
+
+    setContestBanModal({ open: false, userId: null, username: "" });
+    setContestBanContestId("");
+    setContestBanSimilarity(80);
+    setContestBanMatchedUser("");
+    setContestBanProblemId("");
+    setContestBanPermanent(false); // ✅ NEW
+
+    setUsers(prev => prev.map(u =>
+      u._id === contestBanModal.userId
+        ? {
+            ...u,
+            contestPermanentBan: data.permanentContestBan ? true : u.contestPermanentBan,
+            contestBans: [
+              ...(u.contestBans || []),
+              {
+                contestId: contestBanContestId,
+                reason: 'Code similarity detected',
+                similarity: contestBanSimilarity,
+                bannedAt: new Date().toISOString(),
+                isActive: true
+              }
+            ]
+          }
+        : u
+    ));
+
+  } catch (error: any) {
+    showNotification("error", error.response?.data?.message || "Failed to contest-ban user.");
+  }
+};
+
+const refreshViewModal = (updatedUsers: User[]) => {
+  if (viewUserModal.open && viewUserModal.user) {
+    const freshUser = updatedUsers.find(u => u._id === viewUserModal.user!._id);
+    if (freshUser) setViewUserModal({ open: true, user: freshUser });
+  }
+};
+
+const handleContestUnban = async (userId: string, contestId: string) => {  try {
+    const token = localStorage.getItem("token");
+    await axios.patch(
+      `${API_URL}/users/${userId}/contest-unblock`,
+      { contestId },
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    showNotification("success", "Contest ban removed!");
+    
+    // ✅ State update + modal refresh ek saath
+    setUsers(prev => {
+      const updated = prev.map(u =>
+        u._id === userId
+          ? {
+              ...u,
+              contestBans: u.contestBans?.map(b =>
+                b.contestId === contestId ? { ...b, isActive: false } : b
+              )
+            }
+          : u
+      );
+      // Modal mein bhi fresh user do
+      const freshUser = updated.find(u => u._id === userId);
+      if (freshUser) setViewUserModal({ open: true, user: freshUser });
+      return updated;
+    });
+  } catch (error: any) {
+    showNotification("error", "Failed to remove contest ban.");
+  }
+};
+
+const handleRemovePermanentContestBan = async (userId: string, username: string) => {
+  try {
+    const token = localStorage.getItem("token");
+    const res = await fetch(`${API_URL}/users/${userId}/remove-permanent-contest-ban`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) throw new Error('Failed');
+    setUsers(prev => {
+      const updated = prev.map(u =>
+        u._id === userId ? { ...u, contestPermanentBan: false, contestPermanentBanReason: '' } : u
+      );
+      refreshViewModal(updated);
+      return updated;
+    });
+    showNotification('success', `${username} ka permanent contest ban hata diya!`);
+  } catch {
+    showNotification('error', 'Failed to remove permanent contest ban');
+  }
+};
 
 const fetchData = async () => {
     try {
@@ -778,7 +990,7 @@ const handleUpdateOrderStatus = async (orderId: string) => {
   };
 
   const handleDeleteMCQ = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this MCQ question?")) return;
+    showConfirm("Delete MCQ Question", "Are you sure you want to delete this MCQ question?", async () => {
     try {
       const token = localStorage.getItem("token");
       await axios.delete(`${API_URL}/mcq/${id}`, {
@@ -789,6 +1001,7 @@ const handleUpdateOrderStatus = async (orderId: string) => {
     } catch (error: any) {
       showNotification("error", "Failed to delete MCQ question.");
     }
+  });
   };
 
   const handleEditMCQ = (mcq: MCQQuestion) => {
@@ -855,7 +1068,7 @@ const handleUpdateOrderStatus = async (orderId: string) => {
   };
 
   const handleDeleteChatRoom = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this chat room?")) return;
+    showConfirm("Delete Chat Room", "Are you sure you want to delete this chat room?", async () => {
     try {
       const token = localStorage.getItem("token");
       await axios.delete(`${API_URL}/chats/rooms/${id}`, {
@@ -866,6 +1079,7 @@ const handleUpdateOrderStatus = async (orderId: string) => {
     } catch (error: any) {
       showNotification("error", "Failed to delete chat room.");
     }
+  });
   };
 
   const handleCreateContest = async (e: React.FormEvent) => {
@@ -1064,7 +1278,7 @@ const handleUpdateOrderStatus = async (orderId: string) => {
 
   const handleDeleteProblem = async (problemId: string) => {
     console.log("🗑️ Admin: Deleting problem:", problemId);
-    if (!confirm("Are you sure you want to delete this problem?")) return;
+    showConfirm("Delete Problem", "Are you sure you want to delete this problem?", async () => {
 
     try {
       await axios.delete(`${API_URL}/problems/${problemId}`, {
@@ -1077,6 +1291,7 @@ const handleUpdateOrderStatus = async (orderId: string) => {
       console.error("❌ Error deleting problem:", error);
       showNotification("error", "Failed to delete problem.");
     }
+  });
   };
 
   const handleEditProblem = (problem: Problem) => {
@@ -1159,7 +1374,7 @@ const updateData = {
 
   const handleDeleteContest = async (contestId: string) => {
     console.log("🗑️ Admin: Deleting contest:", contestId);
-    if (!confirm("Are you sure you want to delete this contest?")) return;
+    showConfirm("Delete Contest", "Are you sure you want to delete this contest?", async () => {
 
     try {
       await axios.delete(`${API_URL}/contests/${contestId}`, {
@@ -1172,11 +1387,12 @@ const updateData = {
       console.error("❌ Error deleting contest:", error);
       showNotification("error", "Failed to delete contest.");
     }
+  });
   };
 
   const handleDeleteAnnouncement = async (announcementId: string) => {
     console.log("🗑️ Admin: Deleting announcement:", announcementId);
-    if (!confirm("Are you sure you want to delete this announcement?")) return;
+    showConfirm("Delete Announcement", "Are you sure you want to delete this announcement?", async () => {
 
     try {
       await axios.delete(`${API_URL}/announcements/${announcementId}`, {
@@ -1189,11 +1405,12 @@ const updateData = {
       console.error("❌ Error deleting announcement:", error);
       showNotification("error", "Failed to delete announcement.");
     }
+  });
   };
 
   const handleDeleteDiscussion = async (discussionId: string) => {
     console.log("🗑️ Admin: Deleting discussion:", discussionId);
-    if (!confirm("Are you sure you want to delete this discussion?")) return;
+    showConfirm("Delete Discussion", "Are you sure you want to delete this discussion?", async () => {
 
     try {
       await axios.delete(`${API_URL}/discussion/${discussionId}`, {
@@ -1206,6 +1423,7 @@ const updateData = {
       console.error("❌ Error deleting discussion:", error);
       showNotification("error", "Failed to delete discussion.");
     }
+  });
   };
 
   const stats = [
@@ -1217,8 +1435,13 @@ const updateData = {
         "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800",
     },
     {
-      title: "Active Contests",
-      value: contests.filter((c) => c.status === "ongoing").length,
+  title: "Active Contests",
+  value: contests.filter((c) => {
+    const now = new Date();
+    const start = new Date(c.startTime);
+    const end = new Date(c.endTime);
+    return now >= start && now <= end;
+  }).length,
       icon: <Trophy className="h-8 w-8 text-yellow-600" />,
       color:
         "bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800",
@@ -1284,6 +1507,11 @@ const updateData = {
       label: "Redeem Orders",
       icon: <ShoppingCart className="h-4 w-4" />,
     },
+    {
+  id: "plagiarism",
+  label: "Plagiarism",
+  icon: <AlertTriangle className="h-4 w-4 text-red-400" />,
+},
     {
       id: "notifications",
       label: "Notifications",
@@ -1614,6 +1842,373 @@ const updateData = {
       )}
       <div className="relative z-10">
         {/* Notification */}
+{/* ✅ Block Modal */}
+{blockModal.open && (
+  <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[9999] p-4">
+    <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md shadow-2xl border border-red-500">
+      <h2 className="text-xl font-bold text-white mb-2">🚫 Block User</h2>
+      <p className="text-gray-400 mb-4 text-sm">User ko permanently block karo. Woh login nahi kar payega.</p>
+      <label className="text-gray-300 text-sm mb-1 block">Reason (optional)</label>
+      <input
+        type="text"
+        className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 mb-4 border border-gray-600 focus:outline-none focus:border-red-400"
+        placeholder="e.g. Plagiarism, cheating..."
+        value={blockReason}
+        onChange={(e) => setBlockReason(e.target.value)}
+      />
+      <div className="flex gap-3 justify-end">
+        <button onClick={() => { setBlockModal({ open: false, userId: null }); setBlockReason(""); }}
+          className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition">
+          Cancel
+        </button>
+        <button onClick={handleBlockUser}
+          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
+          Yes, Block User
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* ✅ Contest Ban Modal */}
+{contestBanModal.open && (
+  <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[9999] p-4">
+    <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md shadow-2xl border border-orange-500">
+      <h2 className="text-xl font-bold text-white mb-1 flex items-center gap-2">
+        <Shield className="h-5 w-5 text-orange-400" />
+        Contest Ban: {contestBanModal.username}
+      </h2>
+      <p className="text-gray-400 text-sm mb-4">User ko specific contest se disqualify karo (plagiarism).</p>
+
+      <label className="text-gray-300 text-sm mb-1 block">Contest *</label>
+      <select
+        className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 mb-3 border border-gray-600 focus:outline-none focus:border-orange-400"
+        value={contestBanContestId}
+        onChange={(e) => setContestBanContestId(e.target.value)}
+      >
+        <option value="">-- Select Contest --</option>
+        {contests.map(c => (
+          <option key={c._id} value={c._id}>{c.name}</option>
+        ))}
+      </select>
+
+      <label className="text-gray-300 text-sm mb-1 block">Similarity % *</label>
+      <input type="number" min={0} max={100}
+        className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 mb-3 border border-gray-600 focus:outline-none focus:border-orange-400"
+        value={contestBanSimilarity}
+        onChange={(e) => setContestBanSimilarity(Number(e.target.value))}
+      />
+
+      <label className="text-gray-300 text-sm mb-1 block">Matched With User ID (optional)</label>
+      <input type="text"
+        className="w-full bg-gray-700 text-white rounded-lg px-4 py-2 mb-3 border border-gray-600 focus:outline-none focus:border-orange-400"
+        placeholder="Other user's _id"
+        value={contestBanMatchedUser}
+        onChange={(e) => setContestBanMatchedUser(e.target.value)}
+      />
+
+     <div className="mb-4 p-3 bg-red-900/30 border border-red-700 rounded-lg">
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={contestBanPermanent}
+            onChange={(e) => setContestBanPermanent(e.target.checked)}
+            className="w-4 h-4 accent-red-500"
+          />
+          <div>
+            <p className="text-red-300 font-semibold text-sm">🚫 Force Permanent Contest Ban</p>
+            <p className="text-red-400 text-xs mt-0.5">
+              User ko sabhi future contests se permanently ban karo (chahe 1st offense ho).
+            </p>
+          </div>
+        </label>
+      </div>
+
+      <div className="flex gap-3 justify-end">
+        <button onClick={() => {
+          setContestBanModal({ open: false, userId: null, username: "" });
+          setContestBanContestId("");
+          setContestBanSimilarity(80);
+          setContestBanMatchedUser("");
+          setContestBanProblemId("");
+          setContestBanPermanent(false); // ✅ NEW
+        }}
+          className="px-4 py-2 bg-gray-600 hover:bg-gray-500 text-white rounded-lg transition">
+          Cancel
+        </button>
+        <button
+          onClick={handleContestBanUser}
+          disabled={!contestBanContestId}
+          className={`px-4 py-2 disabled:opacity-50 text-white rounded-lg font-semibold transition ${
+            contestBanPermanent
+              ? "bg-red-600 hover:bg-red-700"
+              : "bg-orange-600 hover:bg-orange-700"
+          }`}>
+          {contestBanPermanent ? "🚫 Permanent Ban" : "Contest Ban"}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* ✅ User Detail Modal */}
+{viewUserModal.open && viewUserModal.user && (
+  <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[9999] p-4">
+    <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-2xl shadow-2xl border border-gray-200 dark:border-gray-700 max-h-[85vh] overflow-hidden flex flex-col">
+      <div className="flex items-center justify-between p-5 border-b border-gray-200 dark:border-gray-700">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">{viewUserModal.user.username}</h2>
+          <p className="text-sm text-gray-500">{viewUserModal.user.email}</p>
+        </div>
+        <button onClick={() => setViewUserModal({ open: false, user: null })}
+          className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+          <X className="h-5 w-5" />
+        </button>
+      </div>
+
+      <div className="flex border-b border-gray-200 dark:border-gray-700 px-5">
+        {[
+          { id: "info", label: "Info", icon: <Users className="h-4 w-4" /> },
+          { id: "contestBans", label: `Contest Bans (${viewUserModal.user.contestBans?.filter(b => b.isActive).length || 0} active)`, icon: <Ban className="h-4 w-4" /> },
+         { id: "plagiarism", label: `Warnings (${viewUserModal.user.plagiarismWarnings?.length || 0})`, icon: <AlertTriangle className="h-4 w-4" /> },
+{ id: "plagiarismCases", label: "Plagiarism Cases", icon: <Shield className="h-4 w-4 text-red-400" /> },        ].map(tab => (
+          <button key={tab.id}
+            onClick={() => setActiveUserTab(tab.id as any)}
+            className={`flex items-center gap-1.5 py-3 px-3 border-b-2 text-sm font-medium transition-colors ${
+              activeUserTab === tab.id ? "border-blue-500 text-blue-600" : "border-transparent text-gray-500 hover:text-gray-700"
+            }`}>
+            {tab.icon} {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="overflow-y-auto flex-1 p-5">
+        {activeUserTab === "info" && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <p className="text-xs text-gray-500 mb-1">Role</p>
+                <p className="font-medium text-sm">{viewUserModal.user.role || "user"}</p>
+              </div>
+              <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <p className="text-xs text-gray-500 mb-1">Joined</p>
+                <p className="font-medium text-sm">{viewUserModal.user.createdAt ? new Date(viewUserModal.user.createdAt).toLocaleDateString() : "N/A"}</p>
+              </div>
+              <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <p className="text-xs text-gray-500 mb-1">Account Status</p>
+                {viewUserModal.user.isBanned
+                  ? <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded-full font-medium">🚫 Banned</span>
+                  : <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded-full font-medium">✅ Active</span>}
+              </div>
+              <div className="p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <p className="text-xs text-gray-500 mb-1">Active Contest Bans</p>
+                <p className="font-bold text-sm text-orange-600">{viewUserModal.user.contestBans?.filter(b => b.isActive).length || 0}</p>
+              </div>
+            </div>
+            {viewUserModal.user.isBanned && viewUserModal.user.bannedReason && (
+  <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+    <p className="text-xs font-semibold text-red-700 dark:text-red-300 mb-1">Ban Reason</p>
+    <p className="text-sm text-red-600">{viewUserModal.user.bannedReason}</p>
+  </div>
+)}
+{viewUserModal.user?.contestPermanentBan && (
+  <div className="flex items-center justify-between bg-red-900/30 border border-red-500/50 rounded-lg p-3 mt-2">
+    <div>
+      <span className="text-red-400 font-semibold text-sm">🚫 Permanently Contest Banned</span>
+      <p className="text-gray-400 text-xs mt-1">
+        {viewUserModal.user.contestPermanentBanReason || 'Auto-banned by system'}
+      </p>
+    </div>
+    <button
+      onClick={() => handleRemovePermanentContestBan(
+        viewUserModal.user!._id,
+        viewUserModal.user!.username!
+      )}
+      className="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded-lg transition-colors ml-3"
+    >
+      Remove Ban
+    </button>
+  </div>
+)}
+          </div>
+        )}
+
+        {activeUserTab === "contestBans" && (
+          <div className="space-y-3">
+            {(!viewUserModal.user.contestBans || viewUserModal.user.contestBans.length === 0) ? (
+              <div className="text-center py-8 text-gray-400">
+                <Shield className="h-10 w-10 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No contest bans found.</p>
+              </div>
+            ) : (
+              viewUserModal.user.contestBans.map((ban, idx) => (
+                <div key={ban._id || idx} className={`p-4 rounded-lg border ${
+                  ban.isActive
+                    ? "bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800"
+                    : "bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-700 opacity-60"
+                }`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
+                          ban.isActive ? "bg-orange-200 text-orange-800" : "bg-gray-200 text-gray-600"
+                        }`}>{ban.isActive ? "🚫 Active" : "✅ Removed"}</span>
+                        {ban.similarity && (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                            {ban.similarity}% similarity
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Contest ID: <span className="font-mono">{ban.contestId}</span></p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Reason: {ban.reason}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        Banned: {new Date(ban.bannedAt).toLocaleDateString()}
+                        {ban.unbannedAt && ` • Removed: ${new Date(ban.unbannedAt).toLocaleDateString()}`}
+                      </p>
+                    </div>
+                    {ban.isActive && (
+                      <button
+                        onClick={() => handleContestUnban(viewUserModal.user!._id, ban.contestId)}
+                        className="flex items-center gap-1 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs rounded-lg font-medium transition-colors flex-shrink-0"
+                      >
+                        <UserCheck className="h-3.5 w-3.5" />
+                        Unban
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+      {activeUserTab === "plagiarism" && (
+  <div className="space-y-3">
+    {(!viewUserModal.user.plagiarismWarnings || viewUserModal.user.plagiarismWarnings.length === 0) ? (
+      <div className="text-center py-8 text-gray-400">
+        <AlertTriangle className="h-10 w-10 mx-auto mb-2 opacity-30" />
+        <p className="text-sm">No plagiarism warnings.</p>
+      </div>
+    ) : (
+      viewUserModal.user.plagiarismWarnings.map((w, idx) => (
+        <div key={idx} className="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle className="h-4 w-4 text-yellow-600" />
+            <span className="text-sm font-semibold text-yellow-800 dark:text-yellow-300">Warning #{idx + 1}</span>
+          </div>
+          <pre className="text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap overflow-auto">
+            {JSON.stringify(w, null, 2)}
+          </pre>
+        </div>
+      ))
+    )}
+  </div>
+)}
+
+{activeUserTab === "plagiarismCases" && (
+  <div className="space-y-3">
+    <p className="text-xs text-gray-500 mb-3">
+      Yeh cases sirf un contests ke hain jisme is user ka code similar tha.
+    </p>
+    {contests
+      .filter((c: Contest) =>
+        (c as any).plagiarismCases?.some(
+          (pc: any) =>
+            pc.user1?.toString() === viewUserModal.user!._id ||
+            pc.user2?.toString() === viewUserModal.user!._id
+        )
+      ).length === 0 ? (
+      <div className="text-center py-8 text-gray-400">
+        <AlertTriangle className="h-10 w-10 mx-auto mb-2 opacity-30" />
+        <p className="text-sm">Koi plagiarism case nahi mila.</p>
+      </div>
+    ) : (
+      contests
+        .flatMap((c: Contest) =>
+          ((c as any).plagiarismCases || [])
+            .map((pc: any, idx: number) => ({
+              ...pc,
+              contestName: c.name,
+              contestId: c._id,
+              idx,
+            }))
+            .filter(
+              (pc: any) =>
+                pc.user1?.toString() === viewUserModal.user!._id ||
+                pc.user2?.toString() === viewUserModal.user!._id
+            )
+        )
+        .map((pc: any, i: number) => (
+          <div key={i} className={`p-4 rounded-lg border ${
+            pc.actionTaken === "pending"
+              ? "bg-red-500/5 border-red-500/30"
+              : "bg-gray-800/60 border-gray-700/50"
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className={`text-2xl font-black ${
+                pc.similarity >= 90 ? "text-red-400" :
+                pc.similarity >= 80 ? "text-orange-400" : "text-yellow-400"
+              }`}>{pc.similarity}%</span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium border ${
+                pc.actionTaken === "pending"     ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/25" :
+                pc.actionTaken === "warned"      ? "bg-orange-500/10 text-orange-400 border-orange-500/25" :
+                pc.actionTaken === "contest_ban" ? "bg-red-500/10 text-red-400 border-red-500/25" :
+                pc.actionTaken === "ignored"     ? "bg-green-500/10 text-green-400 border-green-500/25" :
+                                                   "bg-gray-500/10 text-gray-400 border-gray-500/25"
+              }`}>
+                {pc.actionTaken === "pending"     ? "⏳ Pending" :
+                 pc.actionTaken === "warned"      ? "⚠️ Warned" :
+                 pc.actionTaken === "contest_ban" ? "🚫 Banned" :
+                 pc.actionTaken === "ignored"     ? "✅ Ignored" : pc.actionTaken}
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Contest: <span className="text-gray-200 font-medium">{pc.contestName}</span>
+            </p>
+            <p className="text-xs text-gray-500 mt-1">
+              Detected: {new Date(pc.detectedAt).toLocaleDateString("en-IN", {
+                day: "2-digit", month: "short", year: "numeric",
+              })}
+            </p>
+          </div>
+        ))
+    )}
+  </div>
+)}
+      </div>
+    </div>
+  </div>
+)}
+
+        {/* Global Confirm Modal */}
+        {confirmModal.open && (
+          <div style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999999, padding: '16px' }}>
+            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 w-full max-w-sm border border-gray-200 dark:border-gray-700">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{confirmModal.title}</h3>
+              </div>
+              <p className="text-gray-600 dark:text-gray-400 mb-6 text-sm">{confirmModal.message}</p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={closeConfirm}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => { confirmModal.onConfirm(); closeConfirm(); }}
+                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {notification && (
           <div
             style={{ position: 'fixed', top: '80px', right: '16px', zIndex: 999999 }}
@@ -1745,16 +2340,39 @@ const updateData = {
 
               {activeTab === "users" && (
                 <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-lg font-semibold">Manage Users</h3>
-                    <button
-                      onClick={() => setShowCreateUser(true)}
-                      className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Add User
-                    </button>
-                  </div>
+   <div className="flex items-center justify-between mb-4">
+  <div>
+    <h3 className="text-xl font-bold text-white">Manage Users</h3>
+    <p className="text-sm text-gray-500 mt-0.5">{users.length} total users</p>
+  </div>
+  <button
+    onClick={() => setShowCreateUser(true)}
+    className="flex items-center px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-lg shadow-lg shadow-blue-500/20 transition-all duration-150 text-sm font-medium"
+  >
+    <Plus className="h-4 w-4 mr-2" />
+    Add User
+  </button>
+</div>
+
+{/* Search Bar */}
+<div className="relative mb-6">
+  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+  <input
+    type="text"
+    placeholder="Search by username, email or role..."
+    value={userSearchQuery}
+    onChange={(e) => { setUserSearchQuery(e.target.value); setUserCurrentPage(1); }}
+    className="w-full pl-10 pr-4 py-2.5 bg-gray-800/60 border border-gray-700/60 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-all"
+  />
+  {userSearchQuery && (
+    <button
+      onClick={() => { setUserSearchQuery(""); setUserCurrentPage(1); }}
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+    >
+      <X className="h-4 w-4" />
+    </button>
+  )}
+</div>
 
                   {showCreateUser && (
                     <div className="mb-6 p-6 bg-gray-50 dark:bg-gray-800 rounded-lg max-w-lg">
@@ -1922,110 +2540,249 @@ const updateData = {
                     </div>
                   )}
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[700px] border border-gray-300 bg-white dark:bg-gray-900">
-                      <thead className="bg-gray-50 dark:bg-gray-800">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Username
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Email
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Role
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Created
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                        {users.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={5}
-                              className="text-center py-8 text-gray-400"
-                            >
-                              No users found.
-                            </td>
-                          </tr>
-                        ) : (
-                          users.map((user) => {
-                            // Safe display helpers
-                            const displayName =
-                              typeof user.username === "string" &&
-                              user.username.trim()
-                                ? user.username
-                                : (user.profile &&
-                                  typeof user.profile.firstName === "string" &&
-                                  user.profile.firstName.trim()
-                                    ? user.profile.firstName
-                                    : "") +
-                                    (user.profile &&
-                                    typeof user.profile.lastName === "string" &&
-                                    user.profile.lastName.trim()
-                                      ? ` ${user.profile.lastName}`
-                                      : "") || "N/A";
-                            const displayEmail =
-                              typeof user.email === "string" &&
-                              user.email.trim()
-                                ? user.email
-                                : "N/A";
-                            const displayRole =
-                              typeof user.role === "string" && user.role.trim()
-                                ? user.role
-                                : "user";
-                            let displayCreated = "N/A";
-                            if (user.createdAt) {
-                              try {
-                                displayCreated = new Date(
-                                  user.createdAt
-                                ).toLocaleDateString();
-                              } catch {
-                                displayCreated = "N/A";
-                              }
-                            }
-                            return (
-                              <tr key={user._id}>
-                                <td className="px-6 py-4 whitespace-nowrap font-medium">
-                                  {displayName}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                  {displayEmail}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                  {displayRole}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap">
-                                  {displayCreated}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap flex space-x-2">
-                                  <button
-                                    onClick={() => handleEditUser(user)}
-                                    className="p-2 rounded-md bg-yellow-100 hover:bg-yellow-200 text-yellow-700"
-                                    title="Edit"
-                                  >
-                                    <Edit className="h-4 w-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteUser(user._id)}
-                                    className="p-2 rounded-md bg-red-100 hover:bg-red-200 text-red-700"
-                                    title="Delete"
-                                  >
-                                    <Trash2 className="h-4 w-4" />
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
+             <div className="overflow-x-auto rounded-xl border border-gray-700/50 shadow-2xl">
+  <table className="w-full min-w-[800px] bg-gray-900/80 backdrop-blur-sm">
+    <thead>
+      <tr className="border-b border-gray-700/60">
+        <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Username</th>
+        <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Email</th>
+        <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Role</th>
+        <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Created</th>
+        <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Status</th>
+        <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {users.length === 0 ? (
+        <tr>
+          <td colSpan={6} className="text-center py-16 text-gray-500">
+            <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
+            <p className="text-sm">No users found.</p>
+          </td>
+        </tr>
+      ) : (
+        (() => {
+          const filtered = users.filter(u => {
+            const q = userSearchQuery.toLowerCase();
+            return (
+              (u.username || "").toLowerCase().includes(q) ||
+              (u.email || "").toLowerCase().includes(q) ||
+              (u.role || "").toLowerCase().includes(q)
+            );
+          });
+          const paginated = filtered.slice(
+            (userCurrentPage - 1) * USERS_PER_PAGE,
+            userCurrentPage * USERS_PER_PAGE
+          );
+          return paginated.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="text-center py-16 text-gray-500">
+                <Users className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">{userSearchQuery ? `No results for "${userSearchQuery}"` : "No users found."}</p>
+              </td>
+            </tr>
+          ) : paginated.map((user, idx) => {
+          const displayName =
+            typeof user.username === "string" && user.username.trim()
+              ? user.username
+              : (user.profile && typeof user.profile.firstName === "string" && user.profile.firstName.trim()
+                  ? user.profile.firstName : "") +
+                (user.profile && typeof user.profile.lastName === "string" && user.profile.lastName.trim()
+                  ? ` ${user.profile.lastName}` : "") || "N/A";
+          const displayEmail = typeof user.email === "string" && user.email.trim() ? user.email : "N/A";
+          const displayRole = typeof user.role === "string" && user.role.trim() ? user.role : "user";
+          let displayCreated = "N/A";
+          if (user.createdAt) {
+            try { displayCreated = new Date(user.createdAt).toLocaleDateString(); } catch { displayCreated = "N/A"; }
+          }
+          const avatarLetter = displayName !== "N/A" ? displayName[0].toUpperCase() : "?";
+          const avatarColors = [
+            "from-violet-500 to-purple-600",
+            "from-blue-500 to-cyan-600",
+            "from-emerald-500 to-teal-600",
+            "from-orange-500 to-amber-600",
+            "from-pink-500 to-rose-600",
+            "from-indigo-500 to-blue-600",
+          ];
+          const colorClass = avatarColors[idx % avatarColors.length];
+
+          return (
+            <tr key={user._id} className="border-b border-gray-800/60 hover:bg-white/[0.03] transition-colors duration-150 group">
+              {/* Username with avatar */}
+              <td className="px-5 py-3.5 whitespace-nowrap">
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${colorClass} flex items-center justify-center text-white text-xs font-bold shadow-lg flex-shrink-0`}>
+                    {avatarLetter}
                   </div>
+                  <span className="font-semibold text-white text-sm">{displayName}</span>
+                </div>
+              </td>
+
+              {/* Email */}
+              <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-400">
+                {displayEmail}
+              </td>
+
+              {/* Role */}
+              <td className="px-5 py-3.5 whitespace-nowrap">
+                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium border ${
+                  displayRole === "admin"
+                    ? "bg-violet-500/10 text-violet-300 border-violet-500/30"
+                    : "bg-gray-700/50 text-gray-300 border-gray-600/40"
+                }`}>
+                  {displayRole === "admin" ? "⚡ admin" : "👤 user"}
+                </span>
+              </td>
+
+              {/* Created */}
+              <td className="px-5 py-3.5 whitespace-nowrap text-sm text-gray-500">
+                {displayCreated}
+              </td>
+
+              {/* Status */}
+              <td className="px-5 py-3.5 whitespace-nowrap">
+                <div className="flex flex-col gap-1">
+                  {user.isBanned ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium bg-red-500/10 text-red-400 border border-red-500/25" title={user.bannedReason}>
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse"></span>
+                      Banned
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                      Active
+                    </span>
+                  )}
+                  {(user.contestBans?.filter(b => b.isActive).length || 0) > 0 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25">
+                      ⚠ {user.contestBans!.filter(b => b.isActive).length} ban(s)
+                    </span>
+                  )}
+                </div>
+              </td>
+
+              {/* Actions */}
+              <td className="px-5 py-3.5 whitespace-nowrap">
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => { setViewUserModal({ open: true, user }); setActiveUserTab("info"); }}
+                    className="p-1.5 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 hover:text-blue-300 border border-blue-500/20 hover:border-blue-400/40 transition-all duration-150"
+                    title="View Details">
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+                  <button onClick={() => handleEditUser(user)}
+                    className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/20 hover:border-amber-400/40 transition-all duration-150"
+                    title="Edit">
+                    <Edit className="h-3.5 w-3.5" />
+                  </button>
+                  {user.isBanned ? (
+                    <button onClick={() => handleUnblockUser(user._id)}
+                      className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 hover:text-emerald-300 border border-emerald-500/20 hover:border-emerald-400/40 transition-all duration-150"
+                      title="Unblock">
+                      <CheckCircle className="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <button onClick={() => setBlockModal({ open: true, userId: user._id })}
+                      className="p-1.5 rounded-lg bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 hover:text-orange-300 border border-orange-500/20 hover:border-orange-400/40 transition-all duration-150"
+                      title="Block">
+                      <AlertCircle className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <button onClick={() => setContestBanModal({ open: true, userId: user._id, username: user.username || "User" })}
+                    className="p-1.5 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 hover:text-purple-300 border border-purple-500/20 hover:border-purple-400/40 transition-all duration-150"
+                    title="Contest Ban">
+                    <Shield className="h-3.5 w-3.5" />
+                  </button>
+                  {(user.contestBans?.filter(b => b.isActive).length || 0) > 0 && (
+                    <button onClick={() => { setViewUserModal({ open: true, user }); setActiveUserTab("contestBans"); }}
+                      className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-400/40 transition-all duration-150 relative"
+                      title="Contest Bans">
+                      <Ban className="h-3.5 w-3.5" />
+                      <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[9px] rounded-full flex items-center justify-center font-bold">
+                        {user.contestBans!.filter(b => b.isActive).length}
+                      </span>
+                    </button>
+                  )}
+                  <button onClick={() => handleDeleteUser(user._id)}
+                    className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-400/40 transition-all duration-150"
+                    title="Delete">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </td>
+            </tr>
+          );
+        });
+        })()
+      )}
+    </tbody>
+  </table>
+</div>
+
+{/* Pagination */}
+{(() => {
+  const filtered = users.filter(u => {
+    const q = userSearchQuery.toLowerCase();
+    return (
+      (u.username || "").toLowerCase().includes(q) ||
+      (u.email || "").toLowerCase().includes(q) ||
+      (u.role || "").toLowerCase().includes(q)
+    );
+  });
+  const totalPages = Math.ceil(filtered.length / USERS_PER_PAGE);
+  if (totalPages <= 1) return null;
+  const pages: (number | string)[] = [];
+  for (let i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || Math.abs(i - userCurrentPage) <= 1) {
+      pages.push(i);
+    } else if (pages[pages.length - 1] !== "...") {
+      pages.push("...");
+    }
+  }
+  return (
+    <div className="flex items-center justify-between mt-4 px-1">
+      <p className="text-xs text-gray-500">
+        Showing{" "}
+        <span className="text-gray-300 font-medium">
+          {Math.min((userCurrentPage - 1) * USERS_PER_PAGE + 1, filtered.length)}–{Math.min(userCurrentPage * USERS_PER_PAGE, filtered.length)}
+        </span>{" "}
+        of <span className="text-gray-300 font-medium">{filtered.length}</span> users
+      </p>
+      <div className="flex items-center gap-1.5">
+        <button
+          onClick={() => setUserCurrentPage(p => Math.max(1, p - 1))}
+          disabled={userCurrentPage === 1}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        >
+          ← Prev
+        </button>
+        {pages.map((p, i) =>
+          p === "..." ? (
+            <span key={`dots-${i}`} className="px-1.5 text-gray-600 text-xs select-none">…</span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => setUserCurrentPage(p as number)}
+              className={`w-8 h-8 rounded-lg text-xs font-medium border transition-all ${
+                userCurrentPage === p
+                  ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20"
+                  : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+              }`}
+            >
+              {p}
+            </button>
+          )
+        )}
+        <button
+          onClick={() => setUserCurrentPage(p => Math.min(totalPages, p + 1))}
+          disabled={userCurrentPage === totalPages}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        >
+          Next →
+        </button>
+      </div>
+    </div>
+  );
+})()}
                 </div>
               )}
 
@@ -3050,101 +3807,205 @@ const updateData = {
                     </div>
                   )}
 
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Title
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Difficulty
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Acceptance
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Submissions
-                          </th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                            Actions
-                          </th>
+                  {/* Search Bar */}
+                  <div className="relative mb-5">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                    <input
+                      type="text"
+                      placeholder="Search by title, difficulty, or tag..."
+                      value={problemSearchQuery}
+                      onChange={(e) => { setProblemSearchQuery(e.target.value); setProblemCurrentPage(1); }}
+                      className="w-full pl-10 pr-10 py-2.5 bg-gray-800/60 border border-gray-700/60 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-all"
+                    />
+                    {problemSearchQuery && (
+                      <button
+                        onClick={() => { setProblemSearchQuery(""); setProblemCurrentPage(1); }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-gray-700/50 shadow-xl">
+                    <table className="w-full min-w-[700px] bg-gray-900/80 backdrop-blur-sm">
+                      <thead>
+                        <tr className="border-b border-gray-700/60">
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">#</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Title</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Difficulty</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Acceptance</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Submissions</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Actions</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-gray-200">
-                        {problems.map((problem) => (
-                          <tr key={problem._id}>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <div>
-                                <p className="font-medium">{problem.title}</p>
-                                <div className="flex flex-wrap gap-1 mt-1">
-                                  {problem.tags
-                                    .slice(0, 2)
-                                    .map((tag, index) => (
-                                      <span
-                                        key={index}
-                                        className="px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded"
-                                      >
-                                        {tag}
-                                      </span>
-                                    ))}
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                              <span
-                                className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  problem.difficulty === "Easy"
-                                    ? "bg-green-100 text-green-800"
-                                    : problem.difficulty === "Medium"
-                                    ? "bg-yellow-100 text-yellow-800"
-                                    : "bg-red-100 text-red-800"
-                                }`}
-                              >
-                                {problem.difficulty}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {problem.acceptanceRate.toFixed(1)}%
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                              {problem.submissions}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                              <div className="flex space-x-2">
-                                <button
-                                  onClick={() => handleEditProblem(problem)}
-                                  className="text-blue-600 hover:text-blue-900"
-                                  title="Edit Problem"
-                                >
-                                  <Edit className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() =>
-                                    handleDeleteProblem(problem._id)
-                                  }
-                                  className="text-red-600 hover:text-red-900"
-                                  title="Delete Problem"
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                      <tbody>
+                        {(() => {
+                          const filtered = problems.filter(p => {
+                            const q = problemSearchQuery.toLowerCase();
+                            return (
+                              p.title.toLowerCase().includes(q) ||
+                              p.difficulty.toLowerCase().includes(q) ||
+                              (p.tags || []).some(t => t.toLowerCase().includes(q))
+                            );
+                          });
+                          const paginated = filtered.slice(
+                            (problemCurrentPage - 1) * PROBLEMS_PER_PAGE,
+                            problemCurrentPage * PROBLEMS_PER_PAGE
+                          );
+
+                          if (filtered.length === 0) {
+                            return (
+                              <tr>
+                                <td colSpan={6} className="text-center py-16 text-gray-500">
+                                  <Code className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                                  <p className="text-sm">{problemSearchQuery ? `No results for "${problemSearchQuery}"` : "No problems found."}</p>
+                                </td>
+                              </tr>
+                            );
+                          }
+
+                          return paginated.map((problem, idx) => {
+                            const globalIdx = (problemCurrentPage - 1) * PROBLEMS_PER_PAGE + idx + 1;
+                            return (
+                              <tr key={problem._id} className="border-b border-gray-800/60 hover:bg-white/[0.03] transition-colors duration-150">
+                                <td className="px-5 py-3.5 text-sm text-gray-500 font-mono">{globalIdx}</td>
+                                <td className="px-5 py-3.5">
+                                  <div>
+                                    <p className="font-medium text-sm text-gray-100">{problem.title}</p>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {(problem.tags || []).slice(0, 2).map((tag, i) => (
+                                        <span key={i} className="px-1.5 py-0.5 bg-gray-700/60 text-gray-400 text-[10px] rounded border border-gray-600/40">
+                                          {tag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  <span className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${
+                                    problem.difficulty === "Easy"
+                                      ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                                      : problem.difficulty === "Medium"
+                                      ? "bg-amber-500/10 text-amber-400 border-amber-500/25"
+                                      : "bg-red-500/10 text-red-400 border-red-500/25"
+                                  }`}>
+                                    {problem.difficulty}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3.5 text-sm text-gray-300 font-mono">
+                                  {problem.acceptanceRate.toFixed(1)}%
+                                </td>
+                                <td className="px-5 py-3.5 text-sm text-gray-400">
+                                  {problem.submissions.toLocaleString()}
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => handleEditProblem(problem)}
+                                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/20 hover:border-amber-400/40 transition-all duration-150"
+                                      title="Edit Problem"
+                                    >
+                                      <Edit className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteProblem(problem._id)}
+                                      className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-400/40 transition-all duration-150"
+                                      title="Delete Problem"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        })()}
                       </tbody>
                     </table>
                   </div>
+
+                  {/* Pagination */}
+                  {(() => {
+                    const filtered = problems.filter(p => {
+                      const q = problemSearchQuery.toLowerCase();
+                      return (
+                        p.title.toLowerCase().includes(q) ||
+                        p.difficulty.toLowerCase().includes(q) ||
+                        (p.tags || []).some(t => t.toLowerCase().includes(q))
+                      );
+                    });
+                    const totalPages = Math.ceil(filtered.length / PROBLEMS_PER_PAGE);
+                    if (totalPages <= 1) return null;
+                    const pages: (number | string)[] = [];
+                    for (let i = 1; i <= totalPages; i++) {
+                      if (i === 1 || i === totalPages || Math.abs(i - problemCurrentPage) <= 1) {
+                        pages.push(i);
+                      } else if (pages[pages.length - 1] !== "...") {
+                        pages.push("...");
+                      }
+                    }
+                    return (
+                      <div className="flex items-center justify-between mt-4 px-1">
+                        <p className="text-xs text-gray-500">
+                          Showing{" "}
+                          <span className="text-gray-300 font-medium">
+                            {Math.min((problemCurrentPage - 1) * PROBLEMS_PER_PAGE + 1, filtered.length)}–{Math.min(problemCurrentPage * PROBLEMS_PER_PAGE, filtered.length)}
+                          </span>{" "}
+                          of <span className="text-gray-300 font-medium">{filtered.length}</span> problems
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setProblemCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={problemCurrentPage === 1}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                          >
+                            ← Prev
+                          </button>
+                          {pages.map((p, i) =>
+                            p === "..." ? (
+                              <span key={`dots-${i}`} className="px-1.5 text-gray-600 text-xs select-none">…</span>
+                            ) : (
+                              <button
+                                key={p}
+                                onClick={() => setProblemCurrentPage(p as number)}
+                                className={`w-8 h-8 rounded-lg text-xs font-medium border transition-all ${
+                                  problemCurrentPage === p
+                                    ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20"
+                                    : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                                }`}
+                              >
+                                {p}
+                              </button>
+                            )
+                          )}
+                          <button
+                            onClick={() => setProblemCurrentPage(p => Math.min(totalPages, p + 1))}
+                            disabled={problemCurrentPage === totalPages}
+                            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                          >
+                            Next →
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
               {activeTab === "contests" && (
                 <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-lg font-semibold">Manage Contests</h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                        <Trophy className="h-5 w-5 text-yellow-400" />
+                        Manage Contests
+                      </h3>
+                      <p className="text-sm text-gray-500 mt-0.5">{contests.length} total contests</p>
+                    </div>
                     <button
                       onClick={() => setShowCreateContest(true)}
-                      className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                      className="flex items-center px-4 py-2 bg-gradient-to-r from-yellow-600 to-yellow-500 hover:from-yellow-500 hover:to-yellow-400 text-white rounded-lg shadow-lg shadow-yellow-500/20 transition-all text-sm font-medium"
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       Create Contest
@@ -3437,7 +4298,7 @@ const updateData = {
                               scores:
                             </div>
                             <div className="space-y-2">
-                              {problems.map((problem) => {
+                              {problems.map((problem, pIdx) => {
                                 const isSelected = newContest.problems.some(
                                   (p) => p.problemId === problem._id
                                 );
@@ -3448,7 +4309,7 @@ const updateData = {
 
                                 return (
                                   <div
-                                    key={problem._id}
+                                    key={`contest-problem-${problem._id}-${pIdx}`}
                                     className="flex items-center justify-between p-2 border rounded-md hover:bg-gray-50"
                                   >
                                     <div className="flex items-center flex-1">
@@ -3713,52 +4574,113 @@ const updateData = {
                     </div>
                   )}
 
-                  <div className="space-y-4">
-                    {contests.map((contest) => (
-                      <div
-                        key={contest._id}
-                        className="p-4 border border-gray-200 rounded-lg"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <h4 className="font-semibold">{contest.name}</h4>
-                            <p className="text-sm text-gray-600">
-                              {new Date(contest.startTime).toLocaleString()} -{" "}
-                              {new Date(contest.endTime).toLocaleString()}
-                            </p>
-                            <p className="text-sm text-gray-500">
-                              {contest.participants.length} participants
-                            </p>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                contest.status === "upcoming"
-                                  ? "bg-blue-100 text-blue-800"
-                                  : contest.status === "ongoing"
-                                  ? "bg-green-100 text-green-800"
-                                  : "bg-gray-100 text-gray-800"
-                              }`}
-                            >
-                              {contest.status}
-                            </span>
-                            <button
-                              onClick={() => handleEditContest(contest)}
-                              className="text-blue-600 hover:text-blue-900"
-                              title="Edit Contest"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteContest(contest._id)}
-                              className="text-red-600 hover:text-red-900"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                {/* Search */}
+                  <div className="relative mb-5">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                    <input
+                      type="text"
+                      placeholder="Search by contest name..."
+                      className="w-full pl-10 pr-4 py-2.5 bg-gray-800/60 border border-gray-700/60 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-yellow-500/60 focus:ring-1 focus:ring-yellow-500/30 transition-all"
+                      onChange={(e) => {
+                        const q = e.target.value.toLowerCase();
+                        // inline filter via state not needed — filtering inline below
+                        (e.target as any)._q = q;
+                        e.target.closest('div')!.setAttribute('data-q', q);
+                      }}
+                      id="contestSearch"
+                    />
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-gray-700/50 shadow-xl">
+                    <table className="w-full min-w-[750px] bg-gray-900/80 backdrop-blur-sm">
+                      <thead>
+                        <tr className="border-b border-gray-700/60">
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Contest</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Start</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">End</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Participants</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Status</th>
+                          <th className="px-5 py-4 text-left text-[11px] font-semibold text-gray-400 uppercase tracking-widest">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {contests.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="text-center py-16 text-gray-500">
+                              <Trophy className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                              <p className="text-sm">No contests found.</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          contests.map((contest) => {
+                            const now = new Date();
+                            const start = new Date(contest.startTime);
+                            const end = new Date(contest.endTime);
+                            const isLive = now >= start && now <= end;
+                            const isUpcoming = now < start;
+                            return (
+                              <tr key={contest._id} className="border-b border-gray-800/60 hover:bg-white/[0.03] transition-colors duration-150">
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-base flex-shrink-0 ${
+                                      isLive ? 'bg-green-500/20' : isUpcoming ? 'bg-blue-500/20' : 'bg-gray-700/50'
+                                    }`}>🏆</div>
+                                    <div>
+                                      <p className="font-semibold text-sm text-gray-100">{contest.name}</p>
+                                      <p className="text-xs text-gray-500">{contest.participants.length} registered</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-5 py-3.5 text-xs text-gray-400 whitespace-nowrap">
+                                  {start.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                  <br /><span className="text-gray-600">{start.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </td>
+                                <td className="px-5 py-3.5 text-xs text-gray-400 whitespace-nowrap">
+                                  {end.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
+                                  <br /><span className="text-gray-600">{end.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  <span className="text-sm text-gray-300 font-mono">{contest.participants.length}</span>
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  {isLive ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />Live
+                                    </span>
+                                  ) : isUpcoming ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/25">
+                                      <Calendar className="h-3 w-3" />Upcoming
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-xs font-semibold bg-gray-500/10 text-gray-500 border border-gray-500/25">
+                                      Ended
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-5 py-3.5">
+                                  <div className="flex items-center gap-1.5">
+                                    <button
+                                      onClick={() => handleEditContest(contest)}
+                                      className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/20 hover:border-amber-400/40 transition-all duration-150"
+                                      title="Edit Contest"
+                                    >
+                                      <Edit className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      onClick={() => handleDeleteContest(contest._id)}
+                                      className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-400/40 transition-all duration-150"
+                                      title="Delete Contest"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -4269,18 +5191,41 @@ const updateData = {
               {/* MCQ Questions Tab */}
               {activeTab === "mcq" && (
                 <div>
-                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-lg font-semibold flex items-center">
-                      <HelpCircle className="mr-2 h-6 w-6 text-blue-600" />
-                      Manage MCQ Questions
-                    </h3>
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                        <HelpCircle className="h-5 w-5 text-blue-400" />
+                        Manage MCQ Questions
+                      </h3>
+                      <p className="text-sm text-gray-500 mt-0.5">{mcqQuestions.length} total questions</p>
+                    </div>
                     <button
                       onClick={() => setShowCreateMCQ(true)}
-                      className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                      className="flex items-center px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white rounded-lg shadow-lg shadow-blue-500/20 transition-all text-sm font-medium"
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       Create MCQ Question
                     </button>
+                  </div>
+
+                  {/* Search Bar */}
+                  <div className="relative mb-6">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                    <input
+                      type="text"
+                      placeholder="Search by question, domain, difficulty or tag..."
+                      value={mcqSearchQuery}
+                      onChange={(e) => { setMcqSearchQuery(e.target.value); setMcqCurrentPage(1); }}
+                      className="w-full pl-10 pr-10 py-2.5 bg-gray-800/60 border border-gray-700/60 rounded-xl text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500/60 focus:ring-1 focus:ring-blue-500/30 transition-all"
+                    />
+                    {mcqSearchQuery && (
+                      <button
+                        onClick={() => { setMcqSearchQuery(""); setMcqCurrentPage(1); }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
 
                   {showCreateMCQ && (
@@ -4638,94 +5583,138 @@ const updateData = {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 gap-4">
-                    {mcqQuestions.length === 0 ? (
-                      <div className="text-center py-8 text-gray-500">
-                        No MCQ questions found. Create your first question!
-                      </div>
-                    ) : (
-                      mcqQuestions.map((mcq) => (
-                        <div
-                          key={mcq._id}
-                          className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow border"
-                        >
-                          <div className="flex justify-between items-start mb-4">
-                            <div className="flex-1">
-                              <h4 className="font-semibold text-lg mb-2">
-                                {mcq.question}
-                              </h4>
-                              <div className="flex items-center space-x-4 text-sm text-gray-600">
-                                <span
-                                  className={`px-2 py-1 rounded-full text-xs ${
-                                    mcq.difficulty === "Easy"
-                                      ? "bg-green-100 text-green-800"
-                                      : mcq.difficulty === "Medium"
-                                      ? "bg-yellow-100 text-yellow-800"
-                                      : "bg-red-100 text-red-800"
-                                  }`}
-                                >
-                                  {mcq.difficulty}
-                                </span>
-                                <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs">
-                                  {mcq.domain}
-                                </span>
-                                <span
-                                  className={`px-2 py-1 rounded-full text-xs ${
-                                    mcq.isActive
-                                      ? "bg-green-100 text-green-800"
-                                      : "bg-red-100 text-red-800"
-                                  }`}
-                                >
-                                  {mcq.isActive ? "Active" : "Inactive"}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex space-x-2">
-                              <button
-                                onClick={() => handleEditMCQ(mcq)}
-                                className="text-blue-600 hover:text-blue-800 p-1"
-                                title="Edit MCQ"
-                              >
-                                <Edit className="h-4 w-4" />
+                  <div className="space-y-3">
+                    {(() => {
+                      const filtered = mcqQuestions.filter(m => {
+                        const q = mcqSearchQuery.toLowerCase();
+                        return (
+                          m.question.toLowerCase().includes(q) ||
+                          m.domain.toLowerCase().includes(q) ||
+                          m.difficulty.toLowerCase().includes(q) ||
+                          (m.tags || []).some(t => t.toLowerCase().includes(q))
+                        );
+                      });
+                      const totalMcqPages = Math.ceil(filtered.length / MCQ_PER_PAGE);
+                      const paginated = filtered.slice(
+                        (mcqCurrentPage - 1) * MCQ_PER_PAGE,
+                        mcqCurrentPage * MCQ_PER_PAGE
+                      );
+                      if (filtered.length === 0) return (
+                        <div className="text-center py-16 rounded-xl border border-gray-700/50 bg-gray-900/50">
+                          <HelpCircle className="h-10 w-10 mx-auto mb-3 text-gray-600" />
+                          <p className="text-sm text-gray-500">{mcqSearchQuery ? `No results for "${mcqSearchQuery}"` : "No MCQ questions found."}</p>
+                        </div>
+                      );
+                      return (
+                        <>
+                          {paginated.map((mcq) => (
+                        <div key={mcq._id} className="rounded-xl border border-gray-700/50 bg-gray-900/80 backdrop-blur-sm overflow-hidden hover:border-gray-600/60 transition-all duration-150">
+                          <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-800/60">
+                            <p className="text-sm font-medium text-gray-100 leading-relaxed flex-1">{mcq.question}</p>
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button onClick={() => handleEditMCQ(mcq)}
+                                className="p-1.5 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 hover:text-amber-300 border border-amber-500/20 hover:border-amber-400/40 transition-all"
+                                title="Edit">
+                                <Edit className="h-3.5 w-3.5" />
                               </button>
-                              <button
-                                onClick={() => handleDeleteMCQ(mcq._id)}
-                                className="text-red-600 hover:text-red-800 p-1"
-                              >
-                                <Trash2 className="h-4 w-4" />
+                              <button onClick={() => handleDeleteMCQ(mcq._id)}
+                                className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 border border-red-500/20 hover:border-red-400/40 transition-all"
+                                title="Delete">
+                                <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           </div>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <div className="flex items-center gap-2 px-5 py-2.5 border-b border-gray-800/60 flex-wrap">
+                            <span className={`px-2.5 py-0.5 rounded-md text-xs font-semibold border ${
+                              mcq.difficulty === "Easy" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                              : mcq.difficulty === "Medium" ? "bg-amber-500/10 text-amber-400 border-amber-500/25"
+                              : "bg-red-500/10 text-red-400 border-red-500/25"
+                            }`}>{mcq.difficulty}</span>
+                            <span className="px-2.5 py-0.5 rounded-md text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/25">{mcq.domain}</span>
+                            <span className={`px-2.5 py-0.5 rounded-md text-xs font-medium border ${
+                              mcq.isActive ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/25" : "bg-gray-500/10 text-gray-400 border-gray-500/25"
+                            }`}>{mcq.isActive ? "✓ Active" : "Inactive"}</span>
+                            {(mcq.tags || []).map((tag, i) => (
+                              <span key={i} className="px-2 py-0.5 rounded text-[10px] bg-gray-700/60 text-gray-400 border border-gray-600/40">{tag}</span>
+                            ))}
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 px-5 py-3">
                             {mcq.options.map((option, index) => (
-                              <div
-                                key={index}
-                                className={`p-2 rounded border ${
-                                  option.isCorrect
-                                    ? "bg-green-50 border-green-200 dark:bg-violet-900 dark:border-violet-700"
-                                    : "bg-gray-50 border-gray-200 dark:bg-gray-700 dark:border-gray-600"
-                                }`}
-                              >
-                                <span className="font-medium text-sm">
-                                  {String.fromCharCode(65 + index)}.{" "}
-                                  {option.text}
-                                  {option.isCorrect && (
-                                    <Check className="inline h-4 w-4 ml-2 text-green-600 dark:text-violet-300" />
-                                  )}
-                                </span>
+                              <div key={index} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs ${
+                                option.isCorrect
+                                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-300"
+                                  : "bg-gray-800/50 border-gray-700/40 text-gray-400"
+                              }`}>
+                                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 ${
+                                  option.isCorrect ? "bg-emerald-500 text-white" : "bg-gray-700 text-gray-400"
+                                }`}>{String.fromCharCode(65 + index)}</span>
+                                <span className="flex-1">{option.text}</span>
+                                {option.isCorrect && <Check className="h-3.5 w-3.5 flex-shrink-0" />}
                               </div>
                             ))}
                           </div>
                           {mcq.explanation && (
-                            <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
-                              <p className="text-sm text-blue-800">
-                                <strong>Explanation:</strong> {mcq.explanation}
-                              </p>
+                            <div className="mx-5 mb-3 px-3 py-2 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                              <p className="text-xs text-blue-300"><span className="font-semibold">Explanation: </span>{mcq.explanation}</p>
                             </div>
                           )}
                         </div>
-                      ))
-                    )}
+                   ))}
+
+                          {totalMcqPages > 1 && (
+                            <div className="flex items-center justify-between mt-4 px-1">
+                              <p className="text-xs text-gray-500">
+                                Showing{" "}
+                                <span className="text-gray-300 font-medium">
+                                  {Math.min((mcqCurrentPage - 1) * MCQ_PER_PAGE + 1, filtered.length)}–{Math.min(mcqCurrentPage * MCQ_PER_PAGE, filtered.length)}
+                                </span>{" "}
+                                of <span className="text-gray-300 font-medium">{filtered.length}</span> questions
+                              </p>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  onClick={() => setMcqCurrentPage(p => Math.max(1, p - 1))}
+                                  disabled={mcqCurrentPage === 1}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                                >
+                                  ← Prev
+                                </button>
+                                {(() => {
+                                  const pages: (number | string)[] = [];
+                                  for (let i = 1; i <= totalMcqPages; i++) {
+                                    if (i === 1 || i === totalMcqPages || Math.abs(i - mcqCurrentPage) <= 1) pages.push(i);
+                                    else if (pages[pages.length - 1] !== "...") pages.push("...");
+                                  }
+                                  return pages.map((p, i) =>
+                                    p === "..." ? (
+                                      <span key={`dots-${i}`} className="px-1.5 text-gray-600 text-xs select-none">…</span>
+                                    ) : (
+                                      <button
+                                        key={p}
+                                        onClick={() => setMcqCurrentPage(p as number)}
+                                        className={`w-8 h-8 rounded-lg text-xs font-medium border transition-all ${
+                                          mcqCurrentPage === p
+                                            ? "bg-blue-600 border-blue-500 text-white shadow-lg shadow-blue-500/20"
+                                            : "bg-gray-800 border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                                        }`}
+                                      >
+                                        {p}
+                                      </button>
+                                    )
+                                  );
+                                })()}
+                                <button
+                                  onClick={() => setMcqCurrentPage(p => Math.min(totalMcqPages, p + 1))}
+                                  disabled={mcqCurrentPage === totalMcqPages}
+                                  className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-800 border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                                >
+                                  Next →
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -4734,13 +5723,16 @@ const updateData = {
               {activeTab === "chats" && (
                 <div>
                   <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-lg font-semibold flex items-center">
-                      <MessageSquare className="mr-2 h-6 w-6 text-indigo-600" />
-                      Manage Chat Rooms
-                    </h3>
+                    <div>
+                      <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                        <MessageSquare className="h-5 w-5 text-indigo-400" />
+                        Manage Chat Rooms
+                      </h3>
+                      <p className="text-sm text-gray-500 mt-0.5">{chatRooms.length} total rooms</p>
+                    </div>
                     <button
                       onClick={() => setShowCreateChatRoom(true)}
-                      className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors"
+                      className="flex items-center px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-lg shadow-lg shadow-indigo-500/20 transition-all text-sm font-medium"
                     >
                       <Plus className="h-4 w-4 mr-2" />
                       Create Chat Room
@@ -5149,6 +6141,16 @@ const updateData = {
     )}
   </div>
 )}
+              {activeTab === "plagiarism" && (
+                <PlagiarismAdminPanel
+                  contests={contests}
+                  showNotification={showNotification}
+                  onOpenContestBan={(userId, username) =>
+                    setContestBanModal({ open: true, userId, username })
+                  }
+                />
+              )}
+
               <Outlet />
             </div>
           </div>
