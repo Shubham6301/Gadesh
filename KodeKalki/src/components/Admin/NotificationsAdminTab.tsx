@@ -103,10 +103,14 @@ const NotificationsAdminTab: React.FC = () => {
   });
   const [broadcastLoading, setBroadcastLoading] = useState(false);
   const [broadcastSuccess, setBroadcastSuccess] = useState(false);
+  const [alertModal, setAlertModal] = useState<{ show: boolean; message: string }>({ show: false, message: "" });
+  const showAlert = (message: string) => setAlertModal({ show: true, message });
 
-  const LIMIT = 20;
+  const LIMIT = 10;
   const authHeader = { headers: { Authorization: `Bearer ${token}` } };
-
+const [mcqSearchQuery, setMcqSearchQuery] = useState("");
+const [mcqCurrentPage, setMcqCurrentPage] = useState(1);
+const MCQ_PER_PAGE = 10;
   // ── Fetch notifications ─────────────────────────────────────────────────────
   const fetchNotifications = useCallback(
     async (p = 1) => {
@@ -123,8 +127,9 @@ const NotificationsAdminTab: React.FC = () => {
           `${API_URL}/notifications/admin/all?${params}`,
           authHeader
         );
-        setNotifications(data.notifications);
-        setTotal(data.total);
+const filtered = data.notifications.filter((n: AdminNotification) => !n.deletedByAdmin);
+setNotifications(filtered);
+setTotal(data.total - (data.notifications.length - filtered.length));
         setPage(p);
       } catch (err: any) {
         setError(err.response?.data?.message || "Failed to load notifications");
@@ -147,7 +152,7 @@ const NotificationsAdminTab: React.FC = () => {
       setNotifications((prev) => prev.filter((n) => n._id !== id));
       setTotal((t) => t - 1);
     } catch {
-      alert("Failed to delete notification");
+      showAlert("Failed to delete notification");
     } finally {
       setDeletingId(null);
     }
@@ -162,10 +167,10 @@ const NotificationsAdminTab: React.FC = () => {
         authHeader
       );
       setClearConfirm(false);
-      alert(`✅ Deleted ${data.deleted} notifications older than ${clearDays} days.`);
+      showAlert(`✅ Deleted ${data.deleted} notifications older than ${clearDays} days.`);
       fetchNotifications(1);
     } catch {
-      alert("Failed to clear old notifications");
+      showAlert("Failed to clear old notifications");
     } finally {
       setClearLoading(false);
     }
@@ -174,7 +179,7 @@ const NotificationsAdminTab: React.FC = () => {
   // ── Send broadcast ──────────────────────────────────────────────────────────
   const handleBroadcast = async () => {
     if (!broadcast.title.trim() || !broadcast.message.trim()) {
-      alert("Title and message are required");
+      showAlert("Title and message are required");
       return;
     }
     setBroadcastLoading(true);
@@ -198,7 +203,7 @@ const NotificationsAdminTab: React.FC = () => {
         fetchNotifications(1);
       }, 1800);
     } catch {
-      alert("Failed to send broadcast");
+      showAlert("Failed to send broadcast");
     } finally {
       setBroadcastLoading(false);
     }
@@ -206,8 +211,41 @@ const NotificationsAdminTab: React.FC = () => {
 
   const totalPages = Math.ceil(total / LIMIT);
 
-  return (
+ return (
     <div className="space-y-6">
+      {/* ── Alert Modal ─────────────────────────────────────────────────────── */}
+      {alertModal.show && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className={`rounded-xl border p-6 max-w-sm w-full shadow-2xl ${
+            isDark ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"
+          }`}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                alertModal.message.startsWith("✅")
+                  ? "bg-green-100 dark:bg-green-900/30"
+                  : "bg-red-100 dark:bg-red-900/30"
+              }`}>
+                {alertModal.message.startsWith("✅")
+                  ? <CheckCheck className="h-5 w-5 text-green-600 dark:text-green-400" />
+                  : <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                }
+              </div>
+              <h3 className={`font-semibold ${isDark ? "text-white" : "text-gray-900"}`}>
+                {alertModal.message.startsWith("✅") ? "Success" : "Error"}
+              </h3>
+            </div>
+            <p className={`text-sm mb-5 ${isDark ? "text-gray-300" : "text-gray-600"}`}>
+              {alertModal.message.replace("✅ ", "")}
+            </p>
+            <button
+              onClick={() => setAlertModal({ show: false, message: "" })}
+              className="w-full py-2 rounded-lg text-sm bg-blue-600 text-white hover:bg-blue-700 transition-colors font-medium"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
       {/* ── Header ─────────────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -661,35 +699,62 @@ const NotificationsAdminTab: React.FC = () => {
 
             {/* Pagination */}
             {totalPages > 1 && (
-              <div
-                className={`flex items-center justify-between px-5 py-3 border-t text-sm ${
-                  isDark
-                    ? "border-gray-700 text-gray-400"
-                    : "border-gray-100 text-gray-500"
-                }`}
-              >
-                <span>
-                  Page {page} of {totalPages} — {total} total
+              <div className={`flex items-center justify-between px-5 py-3 border-t text-sm ${
+                isDark ? "border-gray-700 text-gray-400" : "border-gray-100 text-gray-500"
+              }`}>
+                <span className="text-xs">
+                  Showing{" "}
+                  <span className={`font-medium ${isDark ? "text-gray-200" : "text-gray-700"}`}>
+                    {(page - 1) * LIMIT + 1}–{Math.min(page * LIMIT, total)}
+                  </span>{" "}
+                  of <span className={`font-medium ${isDark ? "text-gray-200" : "text-gray-700"}`}>{total}</span>
                 </span>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() => fetchNotifications(page - 1)}
                     disabled={page <= 1}
-                    className={`px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 transition-colors ${
-                      isDark
-                        ? "border-gray-700 hover:bg-gray-700"
-                        : "border-gray-200 hover:bg-gray-50"
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${
+                      isDark ? "border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white" : "border-gray-200 text-gray-500 hover:bg-gray-50"
                     }`}
                   >
                     ← Prev
                   </button>
+
+                  {(() => {
+                    const pages: (number | string)[] = [];
+                    for (let i = 1; i <= totalPages; i++) {
+                      if (i === 1 || i === totalPages || Math.abs(i - page) <= 1) {
+                        pages.push(i);
+                      } else if (pages[pages.length - 1] !== "...") {
+                        pages.push("...");
+                      }
+                    }
+                    return pages.map((p, i) =>
+                      p === "..." ? (
+                        <span key={`dots-${i}`} className="px-1 text-xs text-gray-500 select-none">…</span>
+                      ) : (
+                        <button
+                          key={p}
+                          onClick={() => fetchNotifications(p as number)}
+                          className={`w-8 h-8 rounded-lg text-xs font-medium border transition-all ${
+                            page === p
+                              ? "bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/20"
+                              : isDark
+                              ? "border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white"
+                              : "border-gray-200 text-gray-500 hover:bg-gray-50"
+                          }`}
+                        >
+                          {p}
+                        </button>
+                      )
+                    );
+                  })()}
+
                   <button
                     onClick={() => fetchNotifications(page + 1)}
                     disabled={page >= totalPages}
-                    className={`px-3 py-1.5 rounded-lg border text-xs disabled:opacity-40 transition-colors ${
-                      isDark
-                        ? "border-gray-700 hover:bg-gray-700"
-                        : "border-gray-200 hover:bg-gray-50"
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-medium disabled:opacity-30 disabled:cursor-not-allowed transition-colors ${
+                      isDark ? "border-gray-700 text-gray-400 hover:bg-gray-700 hover:text-white" : "border-gray-200 text-gray-500 hover:bg-gray-50"
                     }`}
                   >
                     Next →
