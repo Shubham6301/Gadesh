@@ -209,11 +209,11 @@ const Home: React.FC = () => {
    const [tipIndex, setTipIndex] = useState(0);
   // console.log("🏠 Home component rendered")
 
-  const carouselItems = [
+ const carouselItems = [
     {
       title: "Practice & Master",
       description: "Solve 2000+ coding problems from easy to expert level with detailed explanations",
-      image: "https://images.pexels.com/photos/574071/pexels-photo-574071.jpeg?auto=compress&cs=tinysrgb&w=800",
+      image: "https://res.cloudinary.com/dwh8yiung/image/upload/v1773112952/pexels-photo-574071_e09q00.webp",
       features: ["2000+ Problems", "Multiple Languages", "Real-time Testing"],
       gradient: isDark
       ? "from-transparent via-transparent to-transparent"
@@ -222,7 +222,7 @@ const Home: React.FC = () => {
     {
       title: "Compete Globally",
       description: "Join weekly contests and compete with programmers worldwide",
-      image: "https://images.pexels.com/photos/3184418/pexels-photo-3184418.jpeg?auto=compress&cs=tinysrgb&w=800",
+      image: "https://res.cloudinary.com/dwh8yiung/image/upload/v1773112952/pexels-photo-3184418_borplk.jpg",
       features: ["Weekly Contests", "Global Rankings", "ELO Rating System"],
       gradient: isDark
   ? "from-transparent via-transparent to-transparent"
@@ -231,7 +231,7 @@ const Home: React.FC = () => {
     {
       title: "Play Games Like chess.com",
       description: "Challenge others in live coding battles with anti-cheat protection",
-      image: "https://images.pexels.com/photos/3861969/pexels-photo-3861969.jpeg?auto=compress&cs=tinysrgb&w=800",
+      image: "https://res.cloudinary.com/dwh8yiung/image/upload/v1773112952/pexels-photo-3861969_vwjjy4.webp",
       features: ["Live Battles", "Anti-cheat", "Rating System"],
       gradient: isDark
   ? "from-transparent via-transparent to-transparent"
@@ -240,7 +240,7 @@ const Home: React.FC = () => {
     {
       title: "AI Interview Practice",
       description: "Practice technical interviews with AI-powered questions and feedback",
-      image: "https://www.theladders.com/wp-content/uploads/interview-190927.jpg",
+      image: "https://res.cloudinary.com/dwh8yiung/image/upload/v1773112953/interview-190927_gqxh4z.jpg",
       features: ["AI Questions", "Voice Interaction", "Real-time Feedback"],
       gradient: isDark
   ? "from-transparent via-transparent to-transparent"
@@ -273,8 +273,8 @@ const Home: React.FC = () => {
   useEffect(() => {
     const fullText = "Programming";
     let i = 1;
-    let timeout: NodeJS.Timeout;
-    let interval: NodeJS.Timeout;
+    let timeout: ReturnType<typeof setTimeout>;
+    let interval: ReturnType<typeof setInterval>;
 
     const startTyping = () => {
       interval = setInterval(() => {
@@ -776,7 +776,7 @@ const Home: React.FC = () => {
     },
     {
       label: "Total Submissions",
-      value: user ? `${user.stats?.totalSubmissions + user.stats?.correctSubmissions || 0} submissions` : "Start Now",
+      value: user ? `${user.stats?.totalSubmissions || 0} submissions` : "Start Now",
       icon: <Star className="h-5 w-5" />,
       color: "from-purple-500 to-pink-500",
     },
