@@ -17,6 +17,7 @@ import {
   Flame,
   ChevronDown,
   Swords,
+  Clock, // ⏱️ Time Analytics
 } from "lucide-react";
 
 const Navbar: React.FC = () => {
@@ -100,22 +101,6 @@ const Navbar: React.FC = () => {
 
           {/* Desktop Navigation */}
           <div className="hidden lg:flex items-center gap-8 flex-1">
-            {/* Creators - sirf !user, Problems se pehle, same styling */}
-            {/* {!user && (
-              <a
-                href="https://project-about-page-gray.vercel.app/"
-                target="_blank"
-                rel="noopener noreferrer"
-                className={`text-sm font-medium transition-colors duration-200 ${
-                  isDark
-                    ? "text-gray-300 hover:text-white"
-                    : "text-gray-700 hover:text-gray-900"
-                }`}
-              >
-                Creator's
-              </a>
-            )} */}
-
             {navItems.map((item) => {
               const active = isActive(item.path);
 
@@ -302,6 +287,20 @@ const Navbar: React.FC = () => {
                         Profile
                       </Link>
 
+                      {/* ⏱️ Time Analytics - Desktop Dropdown */}
+                      <Link
+                        to="/time-analytics"
+                        className={`flex items-center px-4 py-2 text-sm transition-colors ${
+                          isDark
+                            ? "text-gray-300 hover:bg-gray-700"
+                            : "text-gray-700 hover:bg-gray-50"
+                        }`}
+                        onClick={() => setIsProfileOpen(false)}
+                      >
+                        <Clock className="h-4 w-4 mr-3" />
+                        Time Analytics
+                      </Link>
+
                       <hr
                         className={`my-1 ${
                           isDark ? "border-gray-700" : "border-gray-200"
@@ -410,22 +409,6 @@ const Navbar: React.FC = () => {
 
               {/* Navigation Items */}
               <div className="px-6 py-4 space-y-2">
-                {/* Creators - Mobile (sirf !user, Problems se pehle) */}
-                {/* {!user && (
-                  <a
-                    href="https://project-about-page-gray.vercel.app/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={`block px-4 py-3 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                      isDark
-                        ? "text-gray-300 hover:text-white hover:bg-gray-800"
-                        : "text-gray-700 hover:text-gray-900 hover:bg-gray-50"
-                    }`}
-                  >
-                    Creator's
-                  </a>
-                )} */}
-
                 {navItems.map((item) => {
                   const active = isActive(item.path);
 
@@ -547,6 +530,20 @@ const Navbar: React.FC = () => {
                     >
                       <User className="h-4 w-4 mr-3" />
                       Profile
+                    </Link>
+
+                    {/* ⏱️ Time Analytics - Mobile Menu */}
+                    <Link
+                      to="/time-analytics"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`flex items-center px-4 py-3 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                        isDark
+                          ? "text-gray-300 hover:text-white hover:bg-gray-800"
+                          : "text-gray-700 hover:text-gray-900 hover:bg-gray-50"
+                      }`}
+                    >
+                      <Clock className="h-4 w-4 mr-3" />
+                      Time Analytics
                     </Link>
 
                     <button
