@@ -10,6 +10,7 @@ import AddDocumentTab from "../../components/Admin/AddDocumentTab";
 import HelpManagement from '../../components/Admin/HelpAdminPanel';
 import NotificationsAdminTab from '../../components/Admin/NotificationsAdminTab'; // 🔔
 import PlagiarismAdminPanel from '../../components/Admin/PlagiarismAdminPanel';
+import ReportsAdminTab from '../../components/Admin/ReportsAdminTab';
 import {
   Plus,
   Edit,
@@ -45,6 +46,7 @@ import {
   AlertTriangle,
   Ban,
   UserCheck,
+  Flag,
 } from "lucide-react";
 
 interface MCQQuestion {
@@ -1517,6 +1519,12 @@ const updateData = {
       label: "Notifications",
       icon: <Bell className="h-4 w-4" />,
     },
+
+    {
+  id: "reports",
+  label: "Reports",
+  icon: <Flag className="h-4 w-4 text-red-400" />,
+},
   ];
 
   if (loading) {
@@ -6150,6 +6158,8 @@ const updateData = {
                   }
                 />
               )}
+              
+              {activeTab === "reports" && <ReportsAdminTab />}
 
               <Outlet />
             </div>
