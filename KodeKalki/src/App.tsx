@@ -1,4 +1,5 @@
 import React from 'react';
+import TimeAnalytics from './pages/TimeAnalytics';
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider, useTheme } from './contexts/ThemeContext';
@@ -653,7 +654,8 @@ const AppRoutes = () => {
                    path="/admin/edit-document/:documentId" 
                  element={<ProtectedRoute><EditDocumentWrapper /></ProtectedRoute>} 
                      />
-           
+           <Route path="/time-analytics" element={<ProtectedRoute><TimeAnalytics /></ProtectedRoute>} />
+
             <Route path='/announcements' element={<Announcements/>}/>
             <Route path='/announcements/:id' element={<AnnounceDetail/>}/>
             <Route path="/oauth" element={<OAuthHandler />} />
