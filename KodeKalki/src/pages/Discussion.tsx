@@ -4,7 +4,7 @@ import { showError } from '../utils/toast';
 import { useTheme } from '../contexts/ThemeContext';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
-import { API_URL, SOCKET_URL } from "../config/api";
+import { API_URL } from "../config/api";
 import {
   Search,
   Plus,
@@ -13,7 +13,9 @@ import {
   ThumbsDown,
   Pin,
   Lock,
+  Flag,
 } from 'lucide-react';
+import ReportModal from '../components/ReportModal';
 
 interface Discussion {
   _id: string;
@@ -49,6 +51,7 @@ const Discussion: React.FC = () => {
     content: '',
     tags: '',
   });
+  const [reportModal, setReportModal] = useState<{ id: string; title: string } | null>(null);
 
   useEffect(() => {
     fetchDiscussions();
@@ -642,12 +645,15 @@ const Discussion: React.FC = () => {
                       <span>By {discussion.author.username}</span>
                       <span>{new Date(discussion.createdAt).toLocaleDateString()}</span>
                     </div>
-                    <div className="flex items-center space-x-1">
+                    <Link
+                      to={`/top/${discussion._id}`}
+                      className={`flex items-center space-x-1 cursor-pointer hover:opacity-80 transition-opacity`}
+                    >
                       <MessageSquare className={`h-4 w-4 ${
                         isDark ? "text-[#38bdf8]" : "text-[#6366f1]"
                       }`} />
                       <span>{discussion.comments.length}</span>
-                    </div>
+                    </Link>
                   </div>
                 </div>
                 <div className="ml-4 flex flex-col items-center space-y-1">
@@ -704,6 +710,20 @@ const Discussion: React.FC = () => {
                       }`}
                     />
                   </button>
+                  {/* Report button */}
+                  {user && (
+                    <button
+                      title="Report this discussion"
+                      onClick={() => setReportModal({ id: discussion._id, title: discussion.title })}
+                      className={`p-1 rounded-full transition-all duration-200 shadow mt-1 ${
+                        isDark
+                          ? 'bg-[#23243a] border border-red-500/20 hover:border-red-500/50 hover:bg-red-500/10'
+                          : 'bg-gray-50 border border-red-200 hover:border-red-400 hover:bg-red-50'
+                      }`}
+                    >
+                      <Flag className="h-3.5 w-3.5 text-red-400" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -722,6 +742,18 @@ const Discussion: React.FC = () => {
         )}
         </div>
       </div>
+
+      {/* Report Modal */}
+      {reportModal && (
+        <ReportModal
+          isOpen={!!reportModal}
+          onClose={() => setReportModal(null)}
+          type="discussion"
+          targetId={reportModal.id}
+          targetTitle={reportModal.title}
+          targetUrl={`/discussion`}
+        />
+      )}
     </div>
   );
 };
