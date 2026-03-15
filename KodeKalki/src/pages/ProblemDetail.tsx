@@ -33,6 +33,7 @@ import {
   Settings,
   ArrowDown,
   Trophy,
+  Flag,
 } from "lucide-react"
 import CodeMirrorEditor from "../components/CodeMirrorEditor"
 import ConsoleOutput from "../components/ConsoleOutput"
@@ -40,6 +41,7 @@ import { API_URL } from "../config/api"
 import confetti from "canvas-confetti";
 import toast from "react-hot-toast";
 import { useNavigate } from "react-router-dom";
+import ReportModal from "../components/ReportModal";
 
 
 interface Problem {
@@ -174,6 +176,7 @@ const ProblemDetail: React.FC = () => {
   const [selectedSolutionLanguage, setSelectedSolutionLanguage] = useState<string>("cpp")
   const [isSolved, setIsSolved] = useState(false)
   const [tabSwitchCount, setTabSwitchCount] = useState(0)
+  const [showReportModal, setShowReportModal] = useState(false)
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [aiPrompt, setAiPrompt] = useState("")
@@ -1219,6 +1222,16 @@ useEffect(() => {
                   <span className="text-gray-600 dark:text-gray-400 text-sm">
                     Acceptance: {problem.acceptanceRate.toFixed(2)}% ({problem.submissions} submissions)
                   </span>
+                  {user && (
+                    <button
+                      onClick={() => setShowReportModal(true)}
+                      title="Report this problem"
+                      className="flex items-center gap-1 px-2 py-1 rounded-full text-xs border border-red-300/40 text-red-400 hover:bg-red-500/10 hover:border-red-400 transition-colors"
+                    >
+                      <Flag className="h-3 w-3" />
+                      Report
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -2513,6 +2526,18 @@ useEffect(() => {
                   <Settings className="h-4 w-4" />
                 </button>
 
+                {/* Report Problem Button (Editor) */}
+                {user && (
+                  <button
+                    onClick={() => setShowReportModal(true)}
+                    title="Report this problem"
+                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs border border-red-400/30 text-red-400 hover:bg-red-500/10 hover:border-red-400/60 transition-all duration-200"
+                  >
+                    <Flag className="h-3 w-3" />
+                    Report
+                  </button>
+                )}
+
                 {/* Action Buttons */}
                 {(runResult || submissionResult) && (
                   <button
@@ -2870,6 +2895,18 @@ useEffect(() => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Report Modal */}
+      {problem && (
+        <ReportModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          type="problem"
+          targetId={problem._id}
+          targetTitle={problem.title}
+          targetUrl={`/problems/${problem._id}`}
+        />
       )}
     </div>
   )
