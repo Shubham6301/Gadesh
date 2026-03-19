@@ -49,6 +49,8 @@ import CookiePolicy from './pages/CookiePolicy';
 import HelpArticle from './pages/HelpArticleDetail';
 // ✅ Network Status Toast
 import NetworkStatusToast from './components/NetworkStatusToast';
+import Solutions from './pages/Solutions';
+
 
 // ✅ NEW: Wrapper component for EditDocumentTab to extract URL params
 const EditDocumentWrapper = () => {
@@ -664,6 +666,8 @@ const AppRoutes = () => {
             <Route path="/privacy-policy" element={<PrivacyPolicy />} />
             <Route path="/terms-of-service" element={<TermsOfService />} />
             <Route path="/cookie-policy" element={<CookiePolicy />} />
+            <Route path="/solutions" element={<Solutions />} />
+
           </Routes>
         </div>
       </div>
