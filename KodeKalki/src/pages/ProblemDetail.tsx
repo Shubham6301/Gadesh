@@ -2,10 +2,9 @@
 
 import type React from "react"
 import { useState, useEffect, useRef } from "react"
-import { useParams } from "react-router-dom"
 import { useAuth } from "../contexts/AuthContext"
 import axios from "axios"
-import { showError, showSuccess, showInfo } from '../utils/toast';
+import { showError, showSuccess } from '../utils/toast';
 import {
   Play,
   Send,
@@ -19,8 +18,6 @@ import {
   FileText,
   MessageSquare,
   Bot,
-  Eye,
-  Calendar,
   User,
   Copy,
   Maximize2,
@@ -28,20 +25,19 @@ import {
   History,
   Plus,
   ArrowLeft,
-  Zap, // For complexity analysis
-  GraduationCap, // For visualizer
+  Zap,
+  GraduationCap,
   Settings,
-  ArrowDown,
   Trophy,
   Flag,
 } from "lucide-react"
 import CodeMirrorEditor from "../components/CodeMirrorEditor"
-import ConsoleOutput from "../components/ConsoleOutput"
 import { API_URL } from "../config/api"
+import ReportModal from "../components/ReportModal";
+import ProblemSolutions from "../components/ProblemSolutions";
 import confetti from "canvas-confetti";
 import toast from "react-hot-toast";
-import { useNavigate } from "react-router-dom";
-import ReportModal from "../components/ReportModal";
+import { useParams, useNavigate } from "react-router-dom"
 
 
 interface Problem {
@@ -173,12 +169,14 @@ const ProblemDetail: React.FC = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [submissions, setSubmissions] = useState<Submission[]>([])
   const [solutions, setSolutions] = useState<Solution[]>([])
-  const [selectedSolutionLanguage, setSelectedSolutionLanguage] = useState<string>("cpp")
+  // selectedSolutionLanguage removed — solutions tab handles language internally
+  // Separate state for admin reference solutions — Editorial tab only
+  const [referenceSolutions, setReferenceSolutions] = useState<Solution[]>([])
+  const [selectedRefLanguage, setSelectedRefLanguage] = useState<string>("cpp")
   const [isSolved, setIsSolved] = useState(false)
   const [tabSwitchCount, setTabSwitchCount] = useState(0)
   const [showReportModal, setShowReportModal] = useState(false)
   const [selectedSubmission, setSelectedSubmission] = useState<Submission | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [aiPrompt, setAiPrompt] = useState("")
   const [aiResponse, setAiResponse] = useState("")
   const [aiLoading, setAiLoading] = useState(false)
@@ -186,7 +184,6 @@ const ProblemDetail: React.FC = () => {
   const [isAiMaximized, setIsAiMaximized] = useState(false)
   const [isCodeEditorMaximized, setIsCodeEditorMaximized] = useState(false)
   const chatHistoryRef = useRef<HTMLDivElement>(null)
-  const [showAcceptedCard, setShowAcceptedCard] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null)
   const navigate = useNavigate();
   // New state variables for complexity analysis
@@ -194,15 +191,12 @@ const ProblemDetail: React.FC = () => {
   const [complexityCodeInput, setComplexityCodeInput] = useState("");
   const [complexityAiResponse, setComplexityAiResponse] = useState("");
   const [complexityAiLoading, setComplexityAiLoading] = useState(false);
-  const [complexityChatHistory, setComplexityChatHistory] = useState<{ prompt: string; response: string }[]>([]);
-  const [potdCoinsEarned, setPotdCoinsEarned] = useState<number | null>(null);
   // New state variable for visualizer
   const [isVisualizerMaximized, setIsVisualizerMaximized] = useState(false);
   // Console output ref for auto-scrolling
   const consoleOutputRef = useRef<HTMLDivElement>(null);
   // Active test case tab states
   const [activeTestCaseTab, setActiveTestCaseTab] = useState(0);
-  const [activeSubmissionTestCaseTab, setActiveSubmissionTestCaseTab] = useState(0);
   // Result card overlay states
   const [showResultCard, setShowResultCard] = useState(false);
   const [resultCardData, setResultCardData] = useState<{
@@ -213,18 +207,57 @@ const ProblemDetail: React.FC = () => {
     executionTime?: number;
     memory?: number;
     coinsEarned?: number;
+    solveTime?: number;  // seconds taken by timer
   } | null>(null);
 
+  // ✅ NEW: Mobile panel toggle — switch between problem & editor on mobile
+  const [mobileActivePanel, setMobileActivePanel] = useState<'problem' | 'editor'>('problem');
+  // Best solve time saved in localStorage
+  const [bestSolveTime, setBestSolveTime] = useState<number | null>(() => {
+    const saved = localStorage.getItem(`best_time_${id}`);
+    return saved ? parseInt(saved) : null;
+  });
+  // ✅ Console open/close state — auto-opens on run/submit
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  // LeetCode-style console tab: 'testcase' | 'result'
+  const [consoleTab, setConsoleTab] = useState<'testcase' | 'result'>('testcase');
+  // active test case in console
+  const [consoleTestCaseIdx, setConsoleTestCaseIdx] = useState(0);
 
-  // Auto-scroll chat to bottom in both minimized and maximized mode when new answer appears
-useEffect(() => {
-  if (chatHistoryRef.current) {
-    chatHistoryRef.current.scrollTo({
-      top: chatHistoryRef.current.scrollHeight,
-      behavior: "smooth"
-    });
-  }
-}, [chatHistory, aiResponse, isAiMaximized]);
+  // ── Auto-save ── (silent background save, no UI indicator)
+
+  // ── Notes ──
+  const [notes, setNotes] = useState<string>("");
+  const [notesOpen, setNotesOpen] = useState(false);
+
+  // ── Timer state ──
+  const [timerSeconds, setTimerSeconds] = useState(0);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerVisible, setTimerVisible] = useState(false);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ✅ Convert any YouTube/Vimeo URL to embeddable format
+  const getEmbedUrl = (url: string): string => {
+    if (!url) return '';
+    if (url.includes('youtube.com/embed/') || url.includes('player.vimeo.com')) return url;
+    const watchMatch = url.match(/youtube\.com\/watch\?v=([^&\s]+)/);
+    if (watchMatch) return `https://www.youtube.com/embed/${watchMatch[1]}`;
+    const shortMatch = url.match(/youtu\.be\/([^?\s]+)/);
+    if (shortMatch) return `https://www.youtube.com/embed/${shortMatch[1]}`;
+    const vimeoMatch = url.match(/vimeo\.com\/(\d+)/);
+    if (vimeoMatch) return `https://player.vimeo.com/video/${vimeoMatch[1]}`;
+    return url;
+  };
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (chatHistoryRef.current) {
+      chatHistoryRef.current.scrollTo({
+        top: chatHistoryRef.current.scrollHeight,
+        behavior: "smooth"
+      });
+    }
+  }, [chatHistory, aiResponse, isAiMaximized]);
 
   // Auto-scroll to console output when results are available
   useEffect(() => {
@@ -238,12 +271,6 @@ useEffect(() => {
     }
   }, [runResult, submissionResult]);
 
-  // Manual scroll to bottom handler
-  const scrollChatToBottom = () => {
-    if (chatHistoryRef.current) {
-      chatHistoryRef.current.scrollTop = chatHistoryRef.current.scrollHeight
-    }
-  }
 
   // Scroll to console/bottom of page
   const scrollToBottom = () => {
@@ -253,7 +280,6 @@ useEffect(() => {
         block: 'start' 
       });
     } else {
-      // Fallback to scroll to bottom of page
       window.scrollTo({ 
         top: document.body.scrollHeight, 
         behavior: 'smooth' 
@@ -270,6 +296,7 @@ useEffect(() => {
     executionTime?: number;
     memory?: number;
     coinsEarned?: number;
+    solveTime?: number;
   }) => {
     setResultCardData(data);
     setShowResultCard(true);
@@ -290,7 +317,7 @@ useEffect(() => {
   const [currentSessionId, setCurrentSessionId] = useState<string>("")
   const [loadingHistory, setLoadingHistory] = useState(false)
 
-  // Predefined quick prompts for better user experience
+  // Predefined quick prompts
   const quickPrompts = [
     "What's the optimal approach to solve this problem?",
     "What data structures should I use?",
@@ -307,7 +334,6 @@ useEffect(() => {
 
     const contextualPrompts = [...quickPrompts]
 
-    // Add difficulty-specific prompts
     if (problem.difficulty === "Hard") {
       contextualPrompts.push("Break down this complex problem into smaller subproblems")
       contextualPrompts.push("What advanced algorithms are applicable here?")
@@ -315,7 +341,6 @@ useEffect(() => {
       contextualPrompts.push("What's the simplest approach to solve this?")
     }
 
-    // Add tag-specific prompts
     if (problem.tags?.includes("Dynamic Programming")) {
       contextualPrompts.push("How can I identify the DP pattern here?")
       contextualPrompts.push("What's the recurrence relation?")
@@ -361,7 +386,7 @@ useEffect(() => {
       })
       setAllChatHistory(response.data)
     } catch (error) {
-      console.error("Error loading chat history:", error)
+      import.meta.env.DEV && console.error("Error loading chat history:", error)
     } finally {
       setLoadingHistory(false)
     }
@@ -389,10 +414,9 @@ useEffect(() => {
         },
       )
 
-      // Refresh history to show new message
       loadUserChatHistory()
     } catch (error) {
-      console.error("Error saving chat message:", error)
+      import.meta.env.DEV && console.error("Error saving chat message:", error)
     }
   }
 
@@ -409,7 +433,7 @@ useEffect(() => {
       setCurrentSessionId(sessionId)
       setAiResponse(session.messages?.length > 0 ? session.messages[session.messages.length - 1].response : "")
     } catch (error) {
-      console.error("Error loading chat session:", error)
+      import.meta.env.DEV && console.error("Error loading chat session:", error)
     } finally {
       setLoadingHistory(false)
     }
@@ -423,59 +447,51 @@ useEffect(() => {
     setCurrentSessionId(generateSessionId())
   }
 
-  // Toggle AI maximized view
   const toggleAiMaximized = () => {
     setIsAiMaximized(!isAiMaximized)
   }
 
-  // Toggle Code Editor maximized view
   const toggleCodeEditorMaximized = () => {
     setIsCodeEditorMaximized(!isCodeEditorMaximized)
   }
 
-  // Toggle Complexity Analysis AI maximized view
   const toggleComplexityAiMaximized = () => {
     setIsComplexityAiMaximized(!isComplexityAiMaximized);
-    // When opening, pre-fill with current code
     if (!isComplexityAiMaximized) {
       setComplexityCodeInput(code);
-      setComplexityAiResponse(""); // Clear previous response
-      setComplexityChatHistory([]); // Clear previous chat history
+      setComplexityAiResponse("");
     }
   };
 
-  // Toggle DSA Visualizer maximized view
   const toggleVisualizerMaximized = () => {
     setIsVisualizerMaximized(!isVisualizerMaximized);
   };
 
-  // Handle DSA Visualizer button click
   const handleDsaVisualizerClick = () => {
     setIsVisualizerMaximized(true);
   };
 
-  // Copy to clipboard function
-  const copyToClipboard = async (text: string) => {
+ const copyToClipboard = async (text: string) => {
+  try {
+    await navigator.clipboard.writeText(text);
+    showSuccess("Code copied to clipboard!");
+  } catch (err) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.opacity = "0";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
     try {
-      await navigator.clipboard.writeText(text)
-      alert("Code copied to clipboard!")
-    } catch (err) {
-      console.error("Failed to copy text: ", err)
-      const textArea = document.createElement("textarea")
-      textArea.value = text
-      document.body.appendChild(textArea)
-      textArea.focus()
-      textArea.select()
-      try {
-        document.execCommand("copy")
-        alert("Code copied to clipboard!")
-      } catch (fallbackErr) {
-        console.error("Fallback copy failed: ", fallbackErr)
-        alert("Failed to copy code")
-      }
-      document.body.removeChild(textArea)
+      document.execCommand("copy");
+      showSuccess("Code copied to clipboard!");
+    } catch {
+      showError("Failed to copy code");
     }
+    document.body.removeChild(textArea);
   }
+};
 
   useEffect(() => {
     if (id) {
@@ -487,12 +503,11 @@ useEffect(() => {
   }, [id, user])
 
   useEffect(() => {
-    // Anti-cheat: Detect tab switching
     const handleVisibilityChange = () => {
       if (document.hidden) {
         setTabSwitchCount((prev) => prev + 1)
         if (tabSwitchCount >= 2) {
-          alert("Tab switching detected! This may affect your submission.")
+          toast("⚠️ Tab switching detected! This may affect your submission.", { icon: "🚨", style: { borderRadius: "10px", background: "#333", color: "#fff" } })
         }
       }
     }
@@ -501,27 +516,88 @@ useEffect(() => {
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange)
   }, [tabSwitchCount])
 
-  useEffect(() => {
-    // Anti-cheat: Prevent pasting
-    const preventPaste = (e: Event) => {
-      e.preventDefault()
-      alert("Pasting is not allowed in coding challenges!")
-    }
 
-    const textarea = textareaRef.current
-    if (textarea) {
-      textarea.addEventListener("paste", preventPaste)
-      return () => textarea.removeEventListener("paste", preventPaste)
+
+  // Timer logic
+  useEffect(() => {
+    if (timerRunning) {
+      timerIntervalRef.current = setInterval(() => {
+        setTimerSeconds(s => s + 1);
+      }, 1000);
+    } else {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
     }
-  }, [])
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    };
+  }, [timerRunning]);
+
+  const formatTimer = (secs: number) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  };
+
+  const handleTimerToggle = () => {
+    if (!timerVisible) {
+      setTimerVisible(true);
+      setTimerRunning(true);
+      setTimerSeconds(0);
+    } else {
+      setTimerRunning(p => !p);
+    }
+  };
+
+  const handleTimerReset = () => {
+    setTimerSeconds(0);
+    setTimerRunning(false);
+    setTimerVisible(false);
+  };
+
+  // ── Auto-save: save code every 30s ──
+  useEffect(() => {
+    if (!id || !code) return;
+    const interval = setInterval(() => {
+      localStorage.setItem(`code_${id}_${language}`, code);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [code, id, language]);
+
+  // ── Auto-save: also save on code change (debounced 2s) ──
+  useEffect(() => {
+    if (!id || !code) return;
+    const timeout = setTimeout(() => {
+      localStorage.setItem(`code_${id}_${language}`, code);
+    }, 2000);
+    return () => clearTimeout(timeout);
+  }, [code, id, language]);
+
+  // ── Notes: save on change (debounced 1s) ──
+  useEffect(() => {
+    if (!id) return;
+    const timeout = setTimeout(() => {
+      localStorage.setItem(`notes_${id}`, notes);
+    }, 1000);
+    return () => clearTimeout(timeout);
+  }, [notes, id]);
 
   const fetchProblem = async () => {
     try {
       const response = await axios.get(`${API_URL}/problems/${id}`)
       setProblem(response.data)
-      setCode(response.data.codeTemplates?.[language] || "")
+      // ✅ Auto-save: restore saved code if exists, else use template
+      const savedCode = localStorage.getItem(`code_${id}_${language}`)
+      if (savedCode !== null) {
+        setCode(savedCode)
+      } else {
+        setCode(response.data.codeTemplates?.[language] || "")
+      }
+      // ✅ Notes: restore saved notes
+      const savedNotes = localStorage.getItem(`notes_${id}`)
+      if (savedNotes) setNotes(savedNotes)
     } catch (error) {
-      // console.error("Error fetching problem:", error)
       showError("Failed to load problem details");
     } finally {
       setLoading(false)
@@ -532,11 +608,7 @@ useEffect(() => {
     if (!aiPrompt.trim()) {
       toast.error("Please enter a prompt.", {
         icon: "💡",
-        style: {
-          borderRadius: "10px",
-          background: "#333",
-          color: "#fff",
-        },
+        style: { borderRadius: "10px", background: "#333", color: "#fff" },
       });
       return
     }
@@ -544,11 +616,7 @@ useEffect(() => {
     if (!token) {
       toast.error("Please login to use AI chat feature.", {
         icon: "🔑",
-        style: {
-          borderRadius: "10px",
-          background: "#333",
-          color: "#fff",
-        },
+        style: { borderRadius: "10px", background: "#333", color: "#fff" },
       });
       return
     }
@@ -556,11 +624,7 @@ useEffect(() => {
     if (!problem) {
       toast.error("Problem data not loaded yet. Please wait.", {
         icon: "⏳",
-        style: {
-          borderRadius: "10px",
-          background: "#333",
-          color: "#fff",
-        },
+        style: { borderRadius: "10px", background: "#333", color: "#fff" },
       });
       return
     }
@@ -601,13 +665,11 @@ useEffect(() => {
     User question: ${aiPrompt}
     `.trim();
 
-    // Direct Gemini API call for general AI chat
-    let chatHistoryForGemini = [];
-    chatHistoryForGemini.push({ role: "user", parts: [{ text: context }] });
-    const payload = { contents: chatHistoryForGemini };
-      // const apiKey = process.env.GEMINI_API_KEY || ""; // Using the provided API key
+      let chatHistoryForGemini = [];
+      chatHistoryForGemini.push({ role: "user", parts: [{ text: context }] });
+      const payload = { contents: chatHistoryForGemini };
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`; // Using gemini-2.0-flash as per default
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -643,21 +705,16 @@ useEffect(() => {
       await saveChatMessage(aiPrompt, generatedText)
       setAiPrompt("")
     } catch (error: any) {
-      console.error("AI Error:", error);
+      import.meta.env.DEV && console.error("AI Error:", error);
       if (error.response?.status === 429 || error.response?.data?.error?.includes("quota")) {
-      toast.error("🚫 API quota exceeded! Please try again later.", {
-        icon: "⚠️",
-        duration: 7000,
-        style: {
-          borderRadius: "10px",
-          background: "#1f2937",
-          color: "#fff",
-        },
-      });
-    } else {
-      setAiResponse("Something went wrong while generating the response.");
-    }
-
+        toast.error("🚫 API quota exceeded! Please try again later.", {
+          icon: "⚠️",
+          duration: 7000,
+          style: { borderRadius: "10px", background: "#1f2937", color: "#fff" },
+        });
+      } else {
+        setAiResponse("Something went wrong while generating the response.");
+      }
     } finally {
       setAiLoading(false)
     }
@@ -692,13 +749,11 @@ useEffect(() => {
       ${complexityCodeInput}
       \`\`\``;
 
-      // Direct Gemini API call for complexity analysis
       let chatHistoryForGemini = [];
       chatHistoryForGemini.push({ role: "user", parts: [{ text: prompt }] });
       const payload = { contents: chatHistoryForGemini };
-      // const apiKey = process.env.GEMINI_API_KEY || ""; // Using the provided API key
       const apiKey = import.meta.env.VITE_GEMINI_API_KEY || "";
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`; // Using gemini-1.5-flash as requested
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`;
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -716,9 +771,7 @@ useEffect(() => {
       }
 
       setComplexityAiResponse(generatedText);
-      setComplexityChatHistory((prev) => [...prev, { prompt: complexityCodeInput, response: generatedText }]);
 
-      // Auto-scroll to bottom of complexity chat
       requestAnimationFrame(() => {
         if (bottomRef.current) {
           bottomRef.current.scrollIntoView({ behavior: "smooth" });
@@ -726,7 +779,7 @@ useEffect(() => {
       });
 
     } catch (error) {
-      console.error("Complexity AI Error:", error);
+      import.meta.env.DEV && console.error("Complexity AI Error:", error);
       toast.error("Something went wrong while analyzing complexity.", {
         icon: "❌",
         style: { borderRadius: "10px", background: "#333", color: "#fff" },
@@ -752,7 +805,7 @@ useEffect(() => {
       const solvedProblems = response.data.solvedProblems
       setIsSolved(solvedProblems.some((p: any) => p._id === id))
     } catch (error) {
-      console.error("Error checking solved status:", error)
+      import.meta.env.DEV && console.error("Error checking solved status:", error)
     }
   }
 
@@ -761,7 +814,7 @@ useEffect(() => {
       const response = await axios.get(`${API_URL}/problems/${id}/editorial`)
       setEditorial(response.data.editorial)
     } catch (error) {
-      console.error("Error fetching editorial:", error)
+      import.meta.env.DEV && console.error("Error fetching editorial:", error)
     }
   }
 
@@ -777,7 +830,7 @@ useEffect(() => {
       })
       setSubmissions(response.data.submissions)
     } catch (error) {
-      console.error("Error fetching submissions:", error)
+      import.meta.env.DEV && console.error("Error fetching submissions:", error)
     }
   }
 
@@ -787,18 +840,34 @@ useEffect(() => {
       const fetchedSolutions = response.data.solutions;
       setSolutions(fetchedSolutions);
       
-      // Auto-select first available language
       if (fetchedSolutions.length > 0) {
         const availableLanguages = ['cpp', 'java', 'python', 'c'];
         const firstAvailable = availableLanguages.find(lang => 
           fetchedSolutions.some((sol: Solution) => sol.language === lang)
         );
         if (firstAvailable) {
-          setSelectedSolutionLanguage(firstAvailable);
         }
       }
     } catch (error) {
-      console.error("Error fetching solutions:", error)
+      import.meta.env.DEV && console.error("Error fetching solutions:", error)
+    }
+  }
+
+  // Fetch admin reference solutions for Editorial tab only
+  const fetchReferenceSolutions = async () => {
+    try {
+      const response = await axios.get(`${API_URL}/problems/${id}/solutions`)
+      const fetched = response.data.solutions
+      setReferenceSolutions(fetched)
+      if (fetched.length > 0) {
+        const availableLanguages = ['cpp', 'java', 'python', 'c']
+        const firstAvailable = availableLanguages.find((lang: string) =>
+          fetched.some((sol: Solution) => sol.language === lang)
+        )
+        if (firstAvailable) setSelectedRefLanguage(firstAvailable)
+      }
+    } catch (error) {
+      import.meta.env.DEV && console.error("Error fetching reference solutions:", error)
     }
   }
 
@@ -811,16 +880,14 @@ useEffect(() => {
     }
   }
 
-  // Add near other state declarations
   const [editorSettings, setEditorSettings] = useState({
-    tabSize: 4, // Default to 4 spaces
+    tabSize: 4,
     insertSpaces: true,
     fontSize: 14,
     lineNumbers: true,
     wordWrap: false,
   });
 
-  // Temporary settings for the dropdown (before applying)
   const [tempEditorSettings, setTempEditorSettings] = useState({
     tabSize: 4,
     insertSpaces: true,
@@ -829,37 +896,31 @@ useEffect(() => {
     wordWrap: false,
   });
 
-  // Load settings from localStorage
   useEffect(() => {
     const savedSettings = localStorage.getItem('editorSettings');
     if (savedSettings) {
       const settings = JSON.parse(savedSettings);
       setEditorSettings(settings);
-      setTempEditorSettings(settings); // Sync temp settings
+      setTempEditorSettings(settings);
     }
   }, []);
 
-  // Handle applying settings
   const handleApplySettings = () => {
     setEditorSettings(tempEditorSettings);
     localStorage.setItem('editorSettings', JSON.stringify(tempEditorSettings));
     setShowSettings(false);
   };
 
-  // Handle closing settings without applying
   const handleCloseSettings = () => {
-    // Reset temp settings to current settings
     setTempEditorSettings(editorSettings);
     setShowSettings(false);
   };
 
-  // Handle opening settings (sync temp with current)
   const handleOpenSettings = () => {
     setTempEditorSettings(editorSettings);
     setShowSettings(true);
   };
 
-  // Close settings when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (showSettings && event.target instanceof Element) {
@@ -881,11 +942,7 @@ useEffect(() => {
     if (!code.trim()) {
       toast.error("Please write some code before running!", {
         icon: "✍️",
-        style: {
-          borderRadius: "10px",
-          background: "#333",
-          color: "#fff",
-        },
+        style: { borderRadius: "10px", background: "#333", color: "#fff" },
       });
       return
     }
@@ -893,26 +950,21 @@ useEffect(() => {
     if (!token) {
       toast.error("Please login to run code.", {
         icon: "🔑",
-        style: {
-          borderRadius: "10px",
-          background: "#333",
-          color: "#fff",
-        },
+        style: { borderRadius: "10px", background: "#333", color: "#fff" },
       });
       return
     }
 
     setRunning(true)
     setRunResult(null)
+    // ✅ auto-switch to editor panel on mobile + open console
+    setMobileActivePanel('editor')
+    setConsoleOpen(true)
 
     try {
-      console.log("🔑 Running code with token:", token.substring(0, 20) + "...")
       const response = await axios.post(
         `${API_URL}/problems/${id}/run`,
-        {
-          code,
-          language,
-        },
+        { code, language },
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -922,16 +974,11 @@ useEffect(() => {
       )
       setRunResult(response.data)
     } catch (error: any) {
-      // console.error("Error running code:", error)
       showError("Failed to run code: " + (error.response?.data?.message || "Please try again"));
       if (error.response?.status === 401) {
         toast.error("Authentication failed. Please login again.", {
           icon: "🔒",
-          style: {
-            borderRadius: "10px",
-            background: "#333",
-            color: "#fff",
-          },
+          style: { borderRadius: "10px", background: "#333", color: "#fff" },
         });
         return
       }
@@ -953,11 +1000,7 @@ useEffect(() => {
     if (!code.trim()) {
       toast.error("Please write some code before submitting!", {
         icon: "✍️",
-        style: {
-          borderRadius: "10px",
-          background: "#333",
-          color: "#fff",
-        },
+        style: { borderRadius: "10px", background: "#333", color: "#fff" },
       });
       return
     }
@@ -965,26 +1008,21 @@ useEffect(() => {
     if (!token) {
       toast.error("Please login to submit solutions.", {
         icon: "🔑",
-        style: {
-          borderRadius: "10px",
-          background: "#333",
-          color: "#fff",
-        },
+        style: { borderRadius: "10px", background: "#333", color: "#fff" },
       });
       return
     }
 
     setSubmitting(true)
     setSubmissionResult(null)
+    // ✅ auto-switch to editor panel on mobile + open console
+    setMobileActivePanel('editor')
+    setConsoleOpen(true)
 
     try {
-      console.log("🔑 Submitting solution with token:", token.substring(0, 20) + "...")
       const response = await axios.post(
         `${API_URL}/problems/${id}/submit`,
-        {
-          code,
-          language,
-        },
+        { code, language },
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -998,7 +1036,20 @@ useEffect(() => {
       if (response.data.status === "Accepted") {
         setIsSolved(true);
 
-        // Show result card overlay
+        // ✅ Timer: stop timer and save solve time
+        let solvedInSeconds: number | undefined = undefined;
+        if (timerVisible && timerSeconds > 0) {
+          setTimerRunning(false);
+          solvedInSeconds = timerSeconds;
+          // Save best time to localStorage
+          const prevBest = localStorage.getItem(`best_time_${id}`);
+          const prevBestNum = prevBest ? parseInt(prevBest) : Infinity;
+          if (timerSeconds < prevBestNum) {
+            localStorage.setItem(`best_time_${id}`, String(timerSeconds));
+            setBestSolveTime(timerSeconds);
+          }
+        }
+
         showResultCardWithData({
           type: 'success',
           title: '🎉 Solution Accepted!',
@@ -1009,51 +1060,34 @@ useEffect(() => {
           },
           executionTime: response.data.executionTime,
           memory: response.data.memory,
-          coinsEarned: response.data.potd?.awarded ? response.data.potd.coinsEarned : undefined
+          coinsEarned: response.data.potd?.awarded ? response.data.potd.coinsEarned : undefined,
+          solveTime: solvedInSeconds,
         });
 
-        // 🎉 Trigger confetti animation
-        let duration = 3000; // 3 seconds
-        let animationEnd = Date.now() + duration;
-        let defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 999999 };
+        const duration = 3000;
+        const animationEnd = Date.now() + duration;
+        const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 999999 };
 
-        let interval: any = setInterval(function () {
-          let timeLeft = animationEnd - Date.now();
-
+        const confettiInterval = setInterval(function () {
+          const timeLeft = animationEnd - Date.now();
           if (timeLeft <= 0) {
-            clearInterval(interval);
+            clearInterval(confettiInterval);
             return;
           }
-
-          let particleCount = 50 * (timeLeft / duration);
+          const particleCount = 50 * (timeLeft / duration);
           confetti(Object.assign({}, defaults, { particleCount, origin: { x: Math.random(), y: Math.random() * 0.6 } }));
         }, 250);
 
-
-        // ✅ Show success toast
         toast.success("🎉 Solution Accepted!", {
           icon: "✅",
           duration: 5000,
-          style: {
-            borderRadius: "10px",
-            background: "#333",
-            color: "#fff",
-          },
+          style: { borderRadius: "10px", background: "#333", color: "#fff" },
         });
-
-        setShowAcceptedCard(true); // Show the flash card
 
         if (response.data.potd && response.data.potd.awarded) {
           updateCoins(response.data.potd.totalCoins);
-          setPotdCoinsEarned(response.data.potd.coinsEarned); // <-- This is missing
-          // setTimeout(() => {
-          //   alert(
-          //     `🎉 Congratulations! You solved today's Problem of the Day and earned ${response.data.potd.coinsEarned} coins! 🪙`
-          //   );
-          // }, 1000);
         }
       } else {
-        // Show result card overlay for failure
         showResultCardWithData({
           type: 'failure',
           title: '❌ Solution Failed',
@@ -1067,21 +1101,15 @@ useEffect(() => {
         });
       }
 
-
       if (activeTab === "submissions") {
         fetchSubmissions()
       }
     } catch (error: any) {
-      // console.error("Error submitting solution:", error)
       showError("Submission failed: " + (error.response?.data?.message || "Please try again"));
       if (error.response?.status === 401) {
         toast.error("Authentication failed. Please login again.", {
           icon: "🔒",
-          style: {
-            borderRadius: "10px",
-            background: "#333",
-            color: "#fff",
-          },
+          style: { borderRadius: "10px", background: "#333", color: "#fff" },
         });
         return
       }
@@ -1095,7 +1123,6 @@ useEffect(() => {
         error: error.response?.data?.error || "Submission failed",
       })
 
-      // Show result card overlay for error
       showResultCardWithData({
         type: 'failure',
         title: '❌ Submission Error',
@@ -1109,8 +1136,9 @@ useEffect(() => {
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab)
-    if (tab === "editorial" && !editorial) {
-      fetchEditorial()
+    if (tab === "editorial") {
+      if (!editorial) fetchEditorial()
+      if (referenceSolutions.length === 0) fetchReferenceSolutions()
     } else if (tab === "submissions" && submissions.length === 0) {
       fetchSubmissions()
     } else if (tab === "solutions" && solutions.length === 0) {
@@ -1146,7 +1174,6 @@ useEffect(() => {
         return "text-green-600 dark:text-green-400"
       case "Wrong Answer":
       case "Failed":
-        return "text-red-600 dark:text-red-400"
       case "Compilation Error":
       case "Error":
         return "text-red-600 dark:text-red-400"
@@ -1162,7 +1189,6 @@ useEffect(() => {
         return <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
       case "Wrong Answer":
       case "Failed":
-        return <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
       case "Compilation Error":
       case "Error":
         return <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
@@ -1208,9 +1234,7 @@ useEffect(() => {
               <div>
                 <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">{problem.title}</h1>
                 <div className="flex items-center space-x-4 mt-1">
-                  <span
-                    className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getDifficultyColor(problem.difficulty)}`}
-                  >
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-medium border ${getDifficultyColor(problem.difficulty)}`}>
                     {problem.difficulty}
                   </span>
                   {isSolved && (
@@ -1241,36 +1265,22 @@ useEffect(() => {
                   onClick={handleRun}
                   disabled={running || !token}
                   className="flex items-center px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50"
-                  title={!token ? "Please login to run code" : ""}
                 >
                   {running ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                      Running...
-                    </>
+                    <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>Running...</>
                   ) : (
-                    <>
-                      <Play className="h-4 w-4 mr-2" />
-                      Run
-                    </>
+                    <><Play className="h-4 w-4 mr-2" />Run</>
                   )}
                 </button>
                 <button
                   onClick={handleSubmit}
                   disabled={submitting || !token}
                   className="flex items-center px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-                  title={!token ? "Please login to submit code" : ""}
                 >
                   {submitting ? (
-                    <>
-                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                      Submitting...
-                    </>
+                    <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>Submitting...</>
                   ) : (
-                    <>
-                      <Send className="h-4 w-4 mr-2" />
-                      Submit
-                    </>
+                    <><Send className="h-4 w-4 mr-2" />Submit</>
                   )}
                 </button>
                 <select
@@ -1285,12 +1295,8 @@ useEffect(() => {
                 </select>
                 {(runResult || submissionResult) && (
                   <button
-                    onClick={() => {
-                      setRunResult(null)
-                      setSubmissionResult(null)
-                    }}
-                    className="px-3 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors text-sm font-medium border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
-                    title="Clear Results"
+                    onClick={() => { setRunResult(null); setSubmissionResult(null); }}
+                    className="px-3 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors text-sm font-medium"
                   >
                     Clear Results
                   </button>
@@ -1298,8 +1304,7 @@ useEffect(() => {
               </div>
               <button
                 onClick={toggleCodeEditorMaximized}
-                className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500 ml-2"
-                title="Minimize Code Editor"
+                className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium ml-2"
               >
                 <Minimize2 className="h-5 w-5 mr-2" />
                 Minimize
@@ -1309,13 +1314,10 @@ useEffect(() => {
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex">
+        <div className="flex-1 flex overflow-hidden">
           {/* Code Editor */}
           <div className="flex-1 flex flex-col bg-white dark:bg-gray-850 border-r border-gray-200 dark:border-gray-750">
-            {/* Editor Header */}
             <div className="px-6 py-3 border-b border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-900 flex-shrink-0">
-
-              {/* Warnings */}
               {tabSwitchCount > 0 && (
                 <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                   <p className="text-yellow-800 dark:text-yellow-300 text-sm">
@@ -1323,7 +1325,6 @@ useEffect(() => {
                   </p>
                 </div>
               )}
-
               {selectedSubmission && (
                 <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
                   <p className="text-blue-800 dark:text-blue-300 text-sm">
@@ -1334,7 +1335,6 @@ useEffect(() => {
               )}
             </div>
 
-            {/* Code Editor - FIXED: Proper scrolling configuration */}
             <div className="flex-1 relative p-4">
               <div className="absolute inset-4 border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden shadow-inner">
                 <CodeMirrorEditor
@@ -1342,7 +1342,7 @@ useEffect(() => {
                   onChange={setCode}
                   language={language}
                   disabled={false}
-                  settings={editorSettings} // Pass settings
+                  settings={editorSettings}
                   className="h-full w-full"
                   height="100%"
                   onGoToBottom={scrollToBottom}
@@ -1353,9 +1353,7 @@ useEffect(() => {
           </div>
 
           {/* Console/Results Panel */}
-                    {/* Enhanced Console/Results Panel with Public Test Cases */}
           <div className="w-96 bg-white dark:bg-gray-800 flex flex-col shadow-lg border-l border-gray-200 dark:border-gray-700">
-            {/* Console Header */}
             <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
               <h4 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center">
                 <FileText className="h-4 w-4 mr-2 text-gray-500 dark:text-gray-400" />
@@ -1372,7 +1370,6 @@ useEffect(() => {
             </div>
 
             <div ref={consoleOutputRef} className="flex-1 p-4 overflow-y-auto bg-white dark:bg-gray-850 min-h-[400px]">
-              {/* Show loading state */}
               {(running || submitting) && !runResult && !submissionResult && (
                 <div className="text-center py-8">
                   <div className="animate-spin rounded-full h-8 w-8 border-2 border-blue-500 border-t-transparent mx-auto mb-4"></div>
@@ -1382,10 +1379,8 @@ useEffect(() => {
                 </div>
               )}
 
-              {/* Enhanced LeetCode-style Run Result */}
               {runResult && !submissionResult && (
                 <div className="space-y-4">
-                  {/* Status Header */}
                   <div className={`flex items-center space-x-3 px-4 py-3 rounded-lg ${
                     runResult.status === "Accepted" || runResult.status === "Success"
                       ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800" 
@@ -1412,10 +1407,8 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  {/* Test Case Navigation */}
                   {runResult.testResults && runResult.testResults.length > 0 && (
                     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                      {/* Test Case Tabs */}
                       <div className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                         <div className="flex overflow-x-auto">
                           {runResult.testResults.map((result, index) => (
@@ -1425,7 +1418,7 @@ useEffect(() => {
                               className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-200 flex items-center space-x-2 ${
                                 activeTestCaseTab === index
                                   ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800'
-                                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/50 dark:hover:bg-gray-800/50'
+                                  : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                               }`}
                             >
                               {result.passed ? (
@@ -1444,10 +1437,8 @@ useEffect(() => {
                         </div>
                       </div>
 
-                      {/* Test Case Content */}
                       {runResult.testResults[activeTestCaseTab] && (
                         <div className="p-4 space-y-4">
-                          {/* Input Section */}
                           <div>
                             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Input</h4>
                             <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
@@ -1456,8 +1447,6 @@ useEffect(() => {
                               </pre>
                             </div>
                           </div>
-
-                          {/* Output Section */}
                           <div>
                             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Output</h4>
                             <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
@@ -1466,8 +1455,6 @@ useEffect(() => {
                               </pre>
                             </div>
                           </div>
-
-                          {/* Expected Section */}
                           <div>
                             <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Expected</h4>
                             <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
@@ -1481,7 +1468,6 @@ useEffect(() => {
                     </div>
                   )}
 
-                  {/* Error Display */}
                   {runResult.error && (
                     <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                       <div className="flex items-center mb-2">
@@ -1496,10 +1482,8 @@ useEffect(() => {
                 </div>
               )}
 
-              {/* Enhanced LeetCode-style Submission Result */}
               {submissionResult && (
                 <div className="space-y-4">
-                  {/* Status Header */}
                   <div className={`flex items-center space-x-3 px-4 py-3 rounded-lg ${
                     submissionResult.status === "Accepted"
                       ? "bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800" 
@@ -1526,13 +1510,10 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  {/* POTD Coin Award Notification */}
                   {submissionResult.potd && submissionResult.potd.awarded && (
                     <div className="p-4 bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
                       <div className="flex items-center">
-                        <div className="w-8 h-8 bg-yellow-400 dark:bg-yellow-500 rounded-full flex items-center justify-center text-white text-lg font-bold">
-                          🪙
-                        </div>
+                        <div className="w-8 h-8 bg-yellow-400 dark:bg-yellow-500 rounded-full flex items-center justify-center text-white text-lg font-bold">🪙</div>
                         <div className="ml-3">
                           <h4 className="text-sm font-bold text-yellow-800 dark:text-yellow-200">Problem of the Day Bonus!</h4>
                           <p className="text-xs text-yellow-700 dark:text-yellow-300">
@@ -1543,7 +1524,6 @@ useEffect(() => {
                     </div>
                   )}
 
-                  {/* Submission Error Display */}
                   {submissionResult.error && (
                     <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                       <div className="flex items-center mb-2">
@@ -1558,83 +1538,59 @@ useEffect(() => {
                 </div>
               )}
 
-              {/* Default Public Test Cases View (shown when no run/submit results) */}
               {!runResult && !submissionResult && !running && !submitting && problem?.testCases && (
                 <div className="space-y-4">
                   <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-                    {/* Header */}
                     <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                       <div className="flex items-center space-x-2">
                         <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
                         <h4 className="font-semibold text-gray-900 dark:text-gray-100">Testcase</h4>
-                        <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                        <h4 className="font-semibold text-gray-900 dark:text-gray-100">Test Result</h4>
                       </div>
                     </div>
-
-                    {/* Test Case Tabs */}
                     <div className="border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/30">
                       <div className="flex overflow-x-auto">
-                        {problem.testCases.filter((tc: any) => tc.isPublic).map((testCase: any, index: number) => (
+                        {problem.testCases.filter((tc: { input: string; output: string; isPublic: boolean }) => tc.isPublic).map((_tc: any, index: number) => (
                           <button
                             key={index}
                             onClick={() => setActiveTestCaseTab(index)}
                             className={`px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-all duration-200 ${
                               activeTestCaseTab === index
                                 ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800'
-                                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-white/50 dark:hover:bg-gray-800/50'
+                                : 'border-transparent text-gray-500 dark:text-gray-400'
                             }`}
                           >
                             Case {index + 1}
                           </button>
                         ))}
-                        <button className="px-4 py-3 text-sm font-medium text-gray-400 dark:text-gray-500 cursor-not-allowed">
-                          <Plus className="w-4 h-4" />
-                        </button>
                       </div>
                     </div>
-
-                    {/* Test Case Content */}
-                    {problem.testCases.filter((tc: any) => tc.isPublic)[activeTestCaseTab] && (
+                    {problem.testCases.filter((tc: { input: string; output: string; isPublic: boolean }) => tc.isPublic)[activeTestCaseTab] && (
                       <div className="p-4 space-y-4">
-                        {/* Input Section */}
                         <div>
                           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Input</h4>
                           <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
-                              {problem.testCases.filter((tc: any) => tc.isPublic)[activeTestCaseTab]?.input || 'No input data'}
+                              {problem.testCases.filter((tc: { input: string; output: string; isPublic: boolean }) => tc.isPublic)[activeTestCaseTab]?.input || 'No input data'}
                             </pre>
                           </div>
                         </div>
-
-                        {/* Expected Output Section */}
                         <div>
                           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Expected</h4>
                           <div className="bg-gray-50 dark:bg-gray-900 rounded-lg p-3 border border-gray-200 dark:border-gray-700">
                             <pre className="text-sm font-mono text-gray-800 dark:text-gray-200 whitespace-pre-wrap">
-                              {problem.testCases.filter((tc: any) => tc.isPublic)[activeTestCaseTab]?.output || 'No expected output'}
+                              {problem.testCases.filter((tc: { input: string; output: string; isPublic: boolean }) => tc.isPublic)[activeTestCaseTab]?.output || 'No expected output'}
                             </pre>
                           </div>
                         </div>
                       </div>
                     )}
                   </div>
-
-                  {/* Ready to Test Message */}
-                  <div className="text-center py-6">
-                    <div className="bg-gray-100 dark:bg-gray-700 rounded-full w-12 h-12 flex items-center justify-center mx-auto mb-3">
-                      <Code className="h-6 w-6 text-gray-400" />
-                    </div>
-                    <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">Ready to test?</h4>
-                    <p className="text-gray-500 dark:text-gray-400 text-xs">Run your code to see output</p>
-                  </div>
                 </div>
               )}
             </div>
           </div>
-          </div>
         </div>
-      // </div>
+      </div>
     )
   }
 
@@ -1652,7 +1608,7 @@ useEffect(() => {
               </h2>
               <button
                 onClick={startNewChat}
-                className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
+                className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-sm"
                 title="Start New Chat"
               >
                 <Plus className="h-4 w-4" />
@@ -1662,7 +1618,6 @@ useEffect(() => {
               Problem: <span className="font-medium text-gray-900 dark:text-white">{problem.title}</span>
             </div>
           </div>
-          {/* Chat History List */}
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {loadingHistory ? (
               <div className="text-center text-gray-500 dark:text-gray-400 py-8">
@@ -1684,9 +1639,7 @@ useEffect(() => {
                         : "bg-gray-50 dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
                     }`}
                   >
-                    <div className="font-medium text-sm truncate">
-                      {session.problemTitle}
-                    </div>
+                    <div className="font-medium text-sm truncate">{session.problemTitle}</div>
                     <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                       {new Date(session.date).toLocaleDateString()} • {session.messageCount} messages
                     </div>
@@ -1711,15 +1664,13 @@ useEffect(() => {
             </h2>
             <button
               onClick={toggleAiMaximized}
-              className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
-              title="Minimize AI Chat"
+              className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium"
             >
               <Minimize2 className="h-5 w-5 mr-2" />
               Minimize
             </button>
           </div>
 
-          {/* Chat Messages */}
           <div ref={chatHistoryRef} className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
             {chatHistory.length === 0 && aiResponse === "" && (
               <div className="text-center text-gray-500 dark:text-gray-400 py-12">
@@ -1742,7 +1693,6 @@ useEffect(() => {
 
             {chatHistory.map((chat, index) => (
               <div key={index} className="space-y-4">
-                {/* User Message */}
                 <div className="flex justify-end">
                   <div className="max-w-3xl bg-blue-600 text-white p-3 rounded-xl shadow-md">
                     <div className="flex items-center mb-1">
@@ -1752,7 +1702,6 @@ useEffect(() => {
                     <p className="text-sm whitespace-pre-wrap break-words">{chat.prompt}</p>
                   </div>
                 </div>
-                {/* AI Response */}
                 <AnimatedAiResponse response={chat.response} />
               </div>
             ))}
@@ -1776,10 +1725,9 @@ useEffect(() => {
             {aiResponse && !aiLoading && chatHistory[chatHistory.length -1]?.response !== aiResponse && (
               <AnimatedAiResponse response={aiResponse} />
             )}
-             <div ref={bottomRef} /> {/* For auto-scrolling to bottom */}
+            <div ref={bottomRef} />
           </div>
 
-          {/* AI Chat Input */}
           <div className="p-4 border-t border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-850 flex-shrink-0 shadow-lg">
             <div className="flex items-center space-x-3">
               <textarea
@@ -1800,8 +1748,7 @@ useEffect(() => {
               <button
                 onClick={generateResponse}
                 disabled={aiLoading}
-                className="p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50"
-                title="Send Message"
+                className="p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
               >
                 {aiLoading ? (
                   <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
@@ -1827,8 +1774,7 @@ useEffect(() => {
           </h2>
           <button
             onClick={toggleVisualizerMaximized}
-            className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
-            title="Minimize Visualizer"
+            className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium"
           >
             <Minimize2 className="h-5 w-5 mr-2" />
             Minimize
@@ -1839,6 +1785,7 @@ useEffect(() => {
             src="https://code-viz-seven.vercel.app/"
             title="DSA Visualizer"
             className="w-full h-full border-0"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; web-share"
             allowFullScreen
           ></iframe>
         </div>
@@ -1848,31 +1795,16 @@ useEffect(() => {
 
   // Maximized Complexity Analysis AI View
   if (isComplexityAiMaximized) {
-    // Function to extract Big O notation and description
     const extractComplexity = (response: string) => {
       const timeMatch = response.match(/Time Complexity\s*[:is]*\s*(O\([^)]+\))/i);
       const spaceMatch = response.match(/Space Complexity\s*[:is]*\s*(O\([^)]+\))/i);
-
-      // Fallback: find first O(...) in the text if not found
       const fallbackO = response.match(/O\([^)]+\)/g);
-
-      const timeComplexity = timeMatch
-        ? timeMatch[1]
-        : fallbackO && fallbackO.length > 0
-          ? fallbackO[0]
-          : "N/A";
-      const spaceComplexity = spaceMatch
-        ? spaceMatch[1]
-        : fallbackO && fallbackO.length > 1
-          ? fallbackO[1]
-          : "N/A";
-
-      // Remove complexity lines from the response to get only the justification
+      const timeComplexity = timeMatch ? timeMatch[1] : fallbackO && fallbackO.length > 0 ? fallbackO[0] : "N/A";
+      const spaceComplexity = spaceMatch ? spaceMatch[1] : fallbackO && fallbackO.length > 1 ? fallbackO[1] : "N/A";
       const justification = response
         .replace(/Time Complexity\s*[:is]*\s*O\([^)]+\)\s*\.?/gi, "")
         .replace(/Space Complexity\s*[:is]*\s*O\([^)]+\)\s*\.?/gi, "")
         .trim();
-
       return { timeComplexity, spaceComplexity, justification };
     };
 
@@ -1893,8 +1825,7 @@ useEffect(() => {
             <div className="flex items-center space-x-4">
               <button
                 onClick={toggleComplexityAiMaximized}
-                className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
-                title="Minimize Complexity Analysis AI"
+                className="flex items-center px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors font-medium"
               >
                 <Minimize2 className="h-5 w-5 mr-2" />
                 Minimize
@@ -1930,7 +1861,7 @@ useEffect(() => {
                   onChange={setCode}
                   language={language}
                   disabled={false}
-                  settings={editorSettings} // Pass settings
+                  settings={editorSettings}
                   className="h-full w-full"
                   height="100%"
                   onGoToBottom={scrollToBottom}
@@ -1942,19 +1873,12 @@ useEffect(() => {
               <button
                 onClick={generateComplexityAnalysis}
                 disabled={complexityAiLoading || !token || !complexityCodeInput.trim()}
-                className="flex items-center px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-opacity-50"
-                title={!token ? "Please login to analyze code" : !complexityCodeInput.trim() ? "Please enter code to analyze" : ""}
+                className="flex items-center px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
               >
                 {complexityAiLoading ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
-                    Analyzing...
-                  </>
+                  <><div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>Analyzing...</>
                 ) : (
-                  <>
-                    <Zap className="h-4 w-4 mr-2" />
-                    Analyze Complexity
-                  </>
+                  <><Zap className="h-4 w-4 mr-2" />Analyze Complexity</>
                 )}
               </button>
             </div>
@@ -2008,209 +1932,180 @@ useEffect(() => {
     );
   }
 
-  {(submissionResult || runResult) && (
-  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] transition-opacity duration-300">
-    <div className="bg-white dark:bg-gray-850 border border-gray-300 dark:border-gray-700 rounded-xl shadow-2xl p-6 w-[90%] max-w-md text-center animate-fade-in">
-      <div className="text-4xl mb-4">
-        {submissionResult?.status === "Accepted" ? "🎉" : "⚠️"}
-      </div>
-      <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-  {submissionResult?.status === "Accepted" ? (
-    potdCoinsEarned ? (
-      <>
-        🎉 Congratulations! Your POTD solution was accepted.
-        <div className="mt-2 text-yellow-500 text-sm">
-  💰 You’ve earned <span className="font-semibold">{potdCoinsEarned}</span> CodeCoins!
-</div>
-
-      </>
-    ) : (
-      "🎉 Congratulations! Your solution was accepted."
-    )
-  ) : (
-    "❌ Oops! Your submission didn’t pass."
-  )}
-</h2>
-
-      <p className="text-gray-600 dark:text-gray-300 text-sm mb-4">
-        {submissionResult?.status || runResult?.status}
-      </p>
-      <button
-        onClick={() => {
-          setSubmissionResult(null);
-          setRunResult(null);
-        }}
-        className="px-4 py-2 mt-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 shadow-sm"
-      >
-        OK
-      </button>
-    </div>
-  </div>
-)}
-
+  // ============================================================
+  // MAIN RETURN — LeetCode-style fixed layout
+  // ============================================================
   return (
-    <div className="min-h-screen bg-gray-100 dark:bg-gray-950 flex flex-col transition-colors duration-200">
-      {/* Mobile & Desktop Layout */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden pt-2 md:pt-4">
-        {/* Problem Description Panel - Full width on mobile, half width on desktop */}
-        <div className="w-full md:w-1/2 flex flex-col bg-white dark:bg-gray-850 md:border-r border-gray-200 dark:border-gray-750 shadow-lg">
-          <div className="px-4 md:px-6 pt-4">
-            <button
-              onClick={() => navigate("/problems")}
-              className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 font-medium flex items-center mb-2 transition-colors"
-            >
-              <ArrowLeft className="h-5 w-5 mr-2" />
-              Back to Problems
-            </button>
-          </div>
-          <div className="px-4 md:px-6 py-4 border-b border-gray-200 dark:border-gray-750 flex-shrink-0">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">
-              {problem.title}
-            </h1>
-            <div className="flex items-center space-x-4">
-              <span
-                className={`px-3 py-1 rounded-full text-sm font-medium border ${getDifficultyColor(problem.difficulty)}`}
-              >
-                {problem.difficulty}
-              </span>
-              {isSolved && (
-                <span className="px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 text-sm rounded-full flex items-center">
-                  <CheckCircle className="h-4 w-4 mr-1" />
-                  Solved
-                </span>
-              )}
-              <span className="text-gray-600 dark:text-gray-400 text-sm">
-                Acceptance: {problem.acceptanceRate.toFixed(2)}% ({problem.submissions} submissions)
-              </span>
-            </div>
-            
-            {/* Go to Bottom Button */}
-            <div className="mt-3">
+    // ✅ CHANGED: fixed viewport layout — panels scroll independently, page doesn't scroll
+    <div className="fixed inset-0 bg-gray-100 dark:bg-gray-950 flex flex-col transition-colors duration-200" style={{ top: '64px' }}>
+
+      {/* ✅ NEW: Mobile Panel Toggle Bar — Problem | Editor switch */}
+      <div className="flex md:hidden flex-shrink-0 border-b border-gray-200 dark:border-gray-750 bg-white dark:bg-gray-850">
+        <button
+          onClick={() => setMobileActivePanel('problem')}
+          className={`flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-2 border-b-2 transition-all ${
+            mobileActivePanel === 'problem'
+              ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+              : 'border-transparent text-gray-500 dark:text-gray-400'
+          }`}
+        >
+          <BookOpen className="h-4 w-4" />
+          Problem
+        </button>
+        <button
+          onClick={() => setMobileActivePanel('editor')}
+          className={`flex-1 py-2.5 text-sm font-semibold flex items-center justify-center gap-2 border-b-2 transition-all ${
+            mobileActivePanel === 'editor'
+              ? 'border-blue-600 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
+              : 'border-transparent text-gray-500 dark:text-gray-400'
+          }`}
+        >
+          <Code className="h-4 w-4" />
+          Editor
+          {(running || submitting) && (
+            <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+          )}
+        </button>
+      </div>
+
+      {/* Main flex row */}
+      <div className="flex-1 flex overflow-hidden">
+
+        {/* ── LEFT PANEL: Problem Description ─────────────────── */}
+        {/* Desktop: always shown | Mobile: shown only when mobileActivePanel === 'problem' */}
+        <div className={`
+          ${mobileActivePanel === 'problem' ? 'flex' : 'hidden'} md:flex
+          w-full md:w-1/2 flex-col bg-white dark:bg-gray-850
+          md:border-r border-gray-200 dark:border-gray-750 shadow-lg overflow-hidden
+        `}>
+          {/* ── LeetCode-style Tab Bar ── */}
+          <div className="flex-shrink-0 border-b border-gray-200 dark:border-[#3e3e3e] bg-white dark:bg-[#282828]">
+            <div className="flex items-center h-11 px-1 overflow-x-auto scrollbar-hide" style={{ WebkitOverflowScrolling: 'touch' }}>
+              {[
+                { id: 'description', label: 'Description' },
+                { id: 'editorial',   label: 'Editorial'   },
+                { id: 'submissions', label: 'Submissions' },
+                { id: 'solutions',   label: 'Solutions'   },
+
+              ].map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => handleTabChange(id)}
+                  className={`flex-shrink-0 px-4 h-full text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
+                    activeTab === id
+                      ? 'border-blue-500 text-blue-600 dark:text-[#ffa116]  dark:border-[#ffa116]'
+                      : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              <div className="flex-1" />
+
               <button
-                onClick={scrollToBottom}
-                className="flex items-center px-3 py-2 bg-gray-600 hover:bg-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 text-white rounded-lg transition-all duration-200 shadow-sm hover:shadow-md focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-50 text-sm"
+                onClick={() => navigate("/problems")}
+                className="flex-shrink-0 flex items-center gap-1 px-3 h-8 text-xs text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors rounded"
               >
-                <ArrowDown className="h-4 w-4 mr-2" />
-                Go to Bottom
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back
               </button>
             </div>
           </div>
 
-          <div className="flex-shrink-0 border-b border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-900">
-            <nav className="flex overflow-x-auto md:overflow-x-visible scrollbar-hide space-x-0" style={{ WebkitOverflowScrolling: 'touch' }}>
-              <button
-                onClick={() => handleTabChange("description")}
-                className={`flex-shrink-0 py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-center border-b-2 transition-all duration-200 min-w-max ${
-                  activeTab === "description"
-                    ? "border-blue-600 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-700 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-900 dark:hover:text-gray-100"
-                } flex items-center justify-center space-x-1 md:space-x-2`}
-              >
-                <BookOpen className="h-4 md:h-5 w-4 md:w-5" />
-                <span>Description</span>
-              </button>
-              <button
-                onClick={() => handleTabChange("editorial")}
-                className={`flex-shrink-0 py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-center border-b-2 transition-all duration-200 min-w-max ${
-                  activeTab === "editorial"
-                    ? "border-blue-600 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-700 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-900 dark:hover:text-gray-100"
-                } flex items-center justify-center space-x-1 md:space-x-2`}
-              >
-                <FileText className="h-4 md:h-5 w-4 md:w-5" />
-                <span>Editorial</span>
-              </button>
-              <button
-                onClick={() => handleTabChange("submissions")}
-                className={`flex-shrink-0 py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-center border-b-2 transition-all duration-200 min-w-max ${
-                  activeTab === "submissions"
-                    ? "border-blue-600 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-700 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-900 dark:hover:text-gray-100"
-                } flex items-center justify-center space-x-1 md:space-x-2`}
-              >
-                <History className="h-4 md:h-5 w-4 md:w-5" />
-                <span>Submissions</span>
-              </button>
-              <button
-                onClick={() => handleTabChange("solutions")}
-                className={`flex-shrink-0 py-3 px-3 md:px-4 text-xs md:text-sm font-medium text-center border-b-2 transition-all duration-200 min-w-max ${
-                  activeTab === "solutions"
-                    ? "border-blue-600 text-blue-600 dark:text-blue-400"
-                    : "border-transparent text-gray-700 dark:text-gray-400 hover:border-gray-300 dark:hover:border-gray-600 hover:text-gray-900 dark:hover:text-gray-100"
-                } flex items-center justify-center space-x-1 md:space-x-2`}
-              >
-                <Code className="h-4 md:h-5 w-4 md:w-5" />
-                <span>Solutions</span>
-              </button>
-            </nav>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-gray-50 dark:bg-gray-900 custom-scrollbar">
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto bg-white dark:bg-[#1a1a1a] custom-scrollbar">
             {activeTab === "description" && (
-              <div className="prose dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
-                <h2 className="text-xl font-semibold mb-3 text-gray-900 dark:text-gray-100">Problem Description</h2>
-                <div dangerouslySetInnerHTML={{ __html: problem.description }} className="mb-6" />
+              <div className="px-5 py-5">
+                {/* ── Problem title + meta ── */}
+                <h1 className="text-xl font-semibold text-gray-900 dark:text-white mb-3">{problem.title}</h1>
 
-                <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Examples</h3>
+                <div className="flex flex-wrap items-center gap-2 mb-5">
+                  {/* Difficulty */}
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
+                    problem.difficulty === 'Easy'   ? 'text-green-700  dark:text-green-400  bg-green-100  dark:bg-green-400/10' :
+                    problem.difficulty === 'Medium' ? 'text-yellow-700 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-400/10' :
+                                                      'text-red-700    dark:text-red-400    bg-red-100    dark:bg-red-400/10'
+                  }`}>
+                    {problem.difficulty}
+                  </span>
+
+                  {/* Solved badge */}
+                  {isSolved && (
+                    <span className="flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-400/10 px-2.5 py-1 rounded-full">
+                      <CheckCircle className="h-3 w-3" /> Solved
+                    </span>
+                  )}
+
+                  {/* Acceptance */}
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    Acceptance: <span className="text-gray-700 dark:text-gray-300 font-medium">{problem.acceptanceRate.toFixed(1)}%</span>
+                  </span>
+                </div>
+
+                {/* ── Description ── */}
+                <div
+                  className="text-sm text-gray-800 dark:text-[#eff1f6cc] leading-relaxed mb-6 prose dark:prose-invert max-w-none prose-sm"
+                  dangerouslySetInnerHTML={{ __html: problem.description }}
+                />
+
+                {/* ── Examples ── */}
                 {problem.examples.map((example, index) => (
-                  <div key={index} className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg mb-4 border border-gray-200 dark:border-gray-700 shadow-sm">
-                    <p className="font-medium text-gray-700 dark:text-gray-300 mb-1">Example {index + 1}:</p>
-                    <div className="space-y-2 text-sm">
-                      <div>
-                        <span className="font-semibold text-gray-800 dark:text-gray-200">Input:</span>{" "}
-                        <pre className="inline bg-gray-200 dark:bg-gray-700 p-1 rounded font-mono text-gray-900 dark:text-gray-100">
-                          {example.input}
-                        </pre>
-                      </div>
-                      <div>
-                        <span className="font-semibold text-gray-800 dark:text-gray-200">Output:</span>{" "}
-                        <pre className="inline bg-gray-200 dark:bg-gray-700 p-1 rounded font-mono text-gray-900 dark:text-gray-100">
-                          {example.output}
-                        </pre>
-                      </div>
+                  <div key={index} className="mb-5">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Example {index + 1}:</p>
+                    <div className="bg-gray-50 dark:bg-[#2d2d2d] rounded-lg p-4 font-mono text-sm space-y-1 border border-gray-100 dark:border-[#3e3e3e]">
+                      <div><span className="text-gray-600 dark:text-gray-400 font-semibold not-italic">Input: </span><span className="text-gray-900 dark:text-gray-100">{example.input}</span></div>
+                      <div><span className="text-gray-600 dark:text-gray-400 font-semibold not-italic">Output: </span><span className="text-gray-900 dark:text-gray-100">{example.output}</span></div>
                       {example.explanation && (
-                        <div>
-                          <span className="font-semibold text-gray-800 dark:text-gray-200">Explanation:</span>{" "}
-                          <span className="text-gray-700 dark:text-gray-300">{example.explanation}</span>
-                        </div>
+                        <div className="font-sans mt-1"><span className="text-gray-600 dark:text-gray-400 font-semibold">Explanation: </span><span className="text-gray-700 dark:text-gray-300">{example.explanation}</span></div>
                       )}
                     </div>
                   </div>
                 ))}
 
-                <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Constraints</h3>
-                <div 
-                className="bg-gray-100 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm mb-6"
-                dangerouslySetInnerHTML={{ __html: problem.constraints }} />
-
-                <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100 mt-6">Tags</h3>
-                <div className="flex flex-wrap gap-2 mb-6">
-                  {problem.tags.map((tag, index) => (
-                    <span
-                      key={index}
-                      className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 text-xs font-medium rounded-full border border-blue-200 dark:border-blue-700"
-                    >
-                      {tag}
-                    </span>
-                  ))}
+                {/* ── Constraints ── */}
+                <div className="mb-6">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Constraints:</p>
+                  <div
+                    className="text-sm text-gray-800 dark:text-[#eff1f6cc] leading-relaxed prose dark:prose-invert max-w-none prose-sm"
+                    dangerouslySetInnerHTML={{ __html: problem.constraints }}
+                  />
                 </div>
 
-                <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Companies</h3>
-                <div className="flex flex-wrap gap-2">
-                  {problem.companies.map((company, index) => (
-                    <span
-                      key={index}
-                      className="px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-200 text-xs font-medium rounded-full border border-purple-200 dark:border-purple-700"
-                    >
-                      {company}
-                    </span>
-                  ))}
-                </div>
+                {/* ── Divider ── */}
+                <div className="border-t border-gray-100 dark:border-[#3e3e3e] my-5" />
+
+                {/* ── Tags ── */}
+                {problem.tags && problem.tags.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Topics</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {problem.tags.map((tag, i) => (
+                        <span key={i} className="px-2.5 py-1 text-xs font-medium rounded-full bg-blue-50 dark:bg-[#3e3e3e] text-blue-700 dark:text-[#adadad] hover:bg-blue-100 dark:hover:bg-[#4a4a4a] transition-colors cursor-default">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Companies ── */}
+                {problem.companies && problem.companies.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Companies</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {problem.companies.map((company, i) => (
+                        <span key={i} className="px-2.5 py-1 text-xs font-medium rounded-full bg-purple-50 dark:bg-[#3e3e3e] text-purple-700 dark:text-[#c0a0ff] hover:bg-purple-100 dark:hover:bg-[#4a4a4a] transition-colors cursor-default">
+                          {company}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {activeTab === "editorial" && (
-              <div className="text-gray-800 dark:text-gray-200">
+              <div className="text-gray-800 dark:text-gray-200 space-y-6">
                 <h2 className="text-xl font-semibold mb-3 text-gray-900 dark:text-gray-100">Editorial</h2>
                 {editorial ? (
                   <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md border border-gray-200 dark:border-gray-700">
@@ -2222,9 +2117,9 @@ useEffect(() => {
                         <h3 className="text-lg font-semibold mb-2 text-gray-900 dark:text-gray-100">Video Editorial</h3>
                         <div className="relative" style={{ paddingBottom: "56.25%", height: 0 }}>
                           <iframe
-                            src={editorial.videoUrl}
+                            src={getEmbedUrl(editorial.videoUrl)}
                             title="Video Editorial"
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; web-share"
                             allowFullScreen
                             className="absolute top-0 left-0 w-full h-full rounded-lg"
                           ></iframe>
@@ -2238,6 +2133,64 @@ useEffect(() => {
                     <p className="text-gray-600 dark:text-gray-400">Editorial not available yet.</p>
                   </div>
                 )}
+
+                {(() => {
+                  const validSolutions = referenceSolutions.filter(s => s.language && s.completeCode);
+                  if (referenceSolutions.length === 0) return null;
+                  return (
+                    <div>
+                      <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100 flex items-center">
+                        <Code className="h-5 w-5 mr-2 text-emerald-500" />
+                        Reference Solutions
+                      </h2>
+
+                      {validSolutions.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-10 px-6 rounded-xl border border-dashed border-gray-200 dark:border-[#3e3e3e] bg-gray-50 dark:bg-[#2a2a2a]">
+                          <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-[#3e3e3e] flex items-center justify-center mb-3">
+                            <Code className="h-5 w-5 text-gray-400 dark:text-gray-500" />
+                          </div>
+                          <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Solutions coming soon</p>
+                          <p className="text-xs text-gray-500 dark:text-gray-500 text-center max-w-xs">
+                            Our team is working on adding reference solutions for this problem. Check back later!
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex space-x-1 border-b border-gray-200 dark:border-gray-700">
+                            {validSolutions.map((sol, idx) => (
+                              <button
+                                key={`${sol.language}-${idx}`}
+                                onClick={() => setSelectedRefLanguage(sol.language)}
+                                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px ${
+                                  selectedRefLanguage === sol.language
+                                    ? "border-blue-500 text-blue-600 dark:text-blue-400"
+                                    : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600"
+                                }`}
+                              >
+                                {sol.language === "cpp" ? "C++" : sol.language === "c" ? "C" : sol.language.charAt(0).toUpperCase() + sol.language.slice(1)}
+                              </button>
+                            ))}
+                          </div>
+                          {validSolutions
+                            .filter(s => s.language === selectedRefLanguage)
+                            .map((sol, idx) => (
+                              <div key={`${sol.language}-sol-${idx}`} className="rounded-b-lg rounded-tr-lg border border-gray-700 overflow-hidden bg-gray-900 dark:bg-gray-950 shadow-lg">
+                                <div className="flex items-center justify-between px-4 py-2 bg-gray-800 dark:bg-gray-900 border-b border-gray-700">
+                                  <span className="text-xs text-gray-400 font-mono">
+                                    {sol.language === "cpp" ? "C++" : sol.language === "c" ? "C" : sol.language.charAt(0).toUpperCase() + sol.language.slice(1)}
+                                  </span>
+                                  <button onClick={() => copyToClipboard(sol.completeCode)} className="flex items-center px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded transition-colors">
+                                    <Copy className="h-3 w-3 mr-1" />Copy
+                                  </button>
+                                </div>
+                                <pre className="p-4 overflow-x-auto text-sm text-gray-100 font-mono whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">{sol.completeCode}</pre>
+                              </div>
+                            ))}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -2295,453 +2248,551 @@ useEffect(() => {
 
             {activeTab === "solutions" && (
               <div className="text-gray-800 dark:text-gray-200">
-                <h2 className="text-xl font-semibold mb-4 text-gray-900 dark:text-gray-100">Official Solutions</h2>
-                {solutions.length > 0 ? (
-                  <div>
-                    {/* Language Selection Buttons */}
-                    <div className="flex flex-wrap gap-2 mb-4">
-                      {(['cpp', 'java', 'python', 'c'] as const).map((lang) => {
-                        const solution = solutions.find(s => s.language === lang);
-                        const isActive = selectedSolutionLanguage === lang;
-                        const isAvailable = !!solution;
-                        
-                        return (
-                          <button
-                            key={lang}
-                            onClick={() => isAvailable && setSelectedSolutionLanguage(lang)}
-                            disabled={!isAvailable}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 border ${
-                              isActive && isAvailable
-                                ? 'bg-blue-600 text-white border-blue-600 shadow-md'
-                                : isAvailable
-                                ? 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
-                                : 'bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-600 border-gray-200 dark:border-gray-700 cursor-not-allowed'
-                            }`}
-                          >
-                            {lang === 'cpp' ? 'C++' : 
-                             lang === 'java' ? 'Java' : 
-                             lang === 'python' ? 'Python' : 
-                             'C'}
-                            {!isAvailable && (
-                              <span className="ml-1 text-xs">✕</span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {/* Selected Solution Display */}
-                    {(() => {
-                      const selectedSolution = solutions.find(s => s.language === selectedSolutionLanguage);
-                      
-                      if (selectedSolution) {
-                        return (
-                          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-                            <div className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-750 border-b border-gray-200 dark:border-gray-700">
-                              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                                {selectedSolutionLanguage === 'cpp' ? 'C++' : 
-                                 selectedSolutionLanguage === 'java' ? 'Java' : 
-                                 selectedSolutionLanguage === 'python' ? 'Python' : 
-                                 'C'} Solution
-                              </h3>
-                              <button
-                                onClick={() => copyToClipboard(selectedSolution.completeCode)}
-                                className="flex items-center px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-md text-sm font-medium transition-colors border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
-                              >
-                                <Copy className="h-4 w-4 mr-2" /> Copy Code
-                              </button>
-                            </div>
-                            <div className="p-4">
-                              <CodeMirrorEditor
-                                value={selectedSolution.completeCode}
-                                onChange={() => {}} 
-                                language={selectedSolution.language}
-                                disabled={true}
-                                className="border border-gray-300 dark:border-gray-600 rounded-lg"
-                                height="300px"
-                                onGoToBottom={scrollToBottom}
-                              />
-                            </div>
-                          </div>
-                        );
-                      } else {
-                        return (
-                          <div className="text-center py-8 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                            <Code className="h-8 w-8 mx-auto mb-2 opacity-50 text-gray-600 dark:text-gray-400" />
-                            <p className="text-gray-600 dark:text-gray-400">
-                              Solution not available for {selectedSolutionLanguage === 'cpp' ? 'C++' : 
-                                                         selectedSolutionLanguage === 'java' ? 'Java' : 
-                                                         selectedSolutionLanguage === 'python' ? 'Python' : 
-                                                         'C'}
-                            </p>
-                            <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
-                              Try selecting a different language from the buttons above.
-                            </p>
-                          </div>
-                        );
-                      }
-                    })()}
-                  </div>
-                ) : (
-                  <div className="text-center py-8 bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-                    <Code className="h-8 w-8 mx-auto mb-2 opacity-50 text-gray-600 dark:text-gray-400" />
-                    <p className="text-gray-600 dark:text-gray-400">Official solutions not available yet.</p>
-                  </div>
-                )}
+                <ProblemSolutions
+                  problemId={problem._id}
+                  problemTitle={problem.title}
+                />
               </div>
             )}
-          </div>
-          
-          {/* Mobile Code Editor Section - Only visible on mobile */}
-          <div className="block md:hidden border-t border-gray-200 dark:border-gray-750">
-            {/* Mobile Code Editor Header */}
-            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-900">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center text-sm">
-                    <Code className="h-4 w-4 mr-2 text-emerald-500" />
-                    Code Editor
-                  </h3>
-                  <select
-                    value={language}
-                    onChange={(e) => handleLanguageChange(e.target.value)}
-                    className="ml-3 px-2 py-1 border border-gray-300 dark:border-gray-700 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-xs"
-                  >
-                    <option value="cpp">C++20</option>
-                    <option value="java">Java</option>
-                    <option value="python">Python</option>
-                    <option value="c">C</option>
-                  </select>
-                </div>
-                <div className="flex items-center space-x-2">
-                  {/* Maximize button removed for mobile */}
-                  <button
-                    onClick={handleResetCode}
-                    className="px-2 py-1 text-xs bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded transition-colors"
-                    title="Reset"
-                  >
-                    Reset
-                  </button>
-                </div>
-              </div>
-            </div>
 
-            {/* Mobile Code Editor */}
-            <div>
-              <CodeMirrorEditor
-                value={code}
-                onChange={setCode}
-                language={language}
-                disabled={false}
-                settings={editorSettings}
-                className="w-full"
-                height="24rem"
-                onGoToBottom={scrollToBottom}
-                token={token || undefined}
-              />
-            </div>
-
-            {/* Mobile Console Output - Only console, no duplicate buttons */}
-            <div className="bg-gray-50 dark:bg-gray-900">
-              <ConsoleOutput 
-                ref={consoleOutputRef}
-                publicTestCases={problem?.testCases?.filter((tc: any) => tc.isPublic) || []}
-                runResult={runResult}
-                submissionResult={submissionResult}
-                running={running}
-                submitting={submitting}
-              />
-            </div>
           </div>
         </div>
+        {/* ── END LEFT PANEL ─────────────────────────────────── */}
 
-        {/* Desktop Code Editor Panel - Hidden on mobile */}
-        <div className="hidden md:flex w-1/2 flex-col bg-white dark:bg-gray-850 shadow-lg relative">
-          {/* Code Editor Header */}
-          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-900 flex-shrink-0">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center">
-                  <Code className="h-5 w-5 mr-2 text-emerald-500" />
-                  Editor
-                </h3>
+
+        {/* ── RIGHT PANEL: Code Editor ─────────────────────────── */}
+        {/* Desktop: always shown | Mobile: shown only when mobileActivePanel === 'editor' */}
+        <div className={`
+          ${mobileActivePanel === 'editor' ? 'flex' : 'hidden'} md:flex
+          w-full md:w-1/2 flex-col bg-white dark:bg-gray-850 shadow-lg relative
+        `}>
+
+          {/* ── Editor Toolbar — LeetCode exact style ── */}
+          <div className="flex-shrink-0 border-b border-gray-200 dark:border-[#3e3e3e] bg-white dark:bg-[#282828]" style={{ minHeight: '44px' }}>
+            <div className="flex items-center h-11 px-2 gap-1">
+
+              {/* Language picker */}
+              <div className="relative flex items-center">
                 <select
                   value={language}
                   onChange={(e) => handleLanguageChange(e.target.value)}
-                  className="ml-4 px-3 py-1.5 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm shadow-sm"
+                  className="appearance-none pl-2 pr-6 py-1 rounded text-xs font-medium bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] cursor-pointer border-none outline-none transition-colors"
                 >
                   <option value="cpp">C++20</option>
                   <option value="java">Java</option>
                   <option value="python">Python</option>
                   <option value="c">C</option>
                 </select>
+                <svg className="absolute right-1 h-3 w-3 text-gray-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M19 9l-7 7-7-7" />
+                </svg>
               </div>
-              
-              {/* Right side container with relative positioning for dropdown */}
-              <div className="flex items-center space-x-3 relative">
-                {/* Run and Submit Buttons */}
-                <button
-                  onClick={handleRun}
-                  disabled={running || !token}
-                  className="flex items-center px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-opacity-50 text-sm"
-                  title={!token ? "Please login to run code" : ""}
-                >
-                  {running ? (
-                    <>
-                      <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent mr-1.5"></div>
-                      Running...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="h-3 w-3 mr-1.5" />
-                      Run
-                    </>
-                  )}
-                </button>
-                <button
-                  onClick={handleSubmit}
-                  disabled={submitting || !token}
-                  className="flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 text-sm"
-                  title={!token ? "Please login to submit code" : ""}
-                >
-                  {submitting ? (
-                    <>
-                      <div className="animate-spin rounded-full h-3 w-3 border-2 border-white border-t-transparent mr-1.5"></div>
-                      Submitting...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-3 w-3 mr-1.5" />
-                      Submit
-                    </>
-                  )}
-                </button>
 
-                {/* Settings Button */}
-                <button
-                  onClick={handleOpenSettings}
-                  className="settings-button p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                  title="Editor Settings"
-                >
-                  <Settings className="h-4 w-4" />
-                </button>
+              {/* Separator */}
+              <div className="w-px h-5 bg-gray-200 dark:bg-[#3e3e3e] mx-1 flex-shrink-0" />
 
-                {/* Report Problem Button (Editor) */}
-                {user && (
-                  <button
-                    onClick={() => setShowReportModal(true)}
-                    title="Report this problem"
-                    className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs border border-red-400/30 text-red-400 hover:bg-red-500/10 hover:border-red-400/60 transition-all duration-200"
-                  >
-                    <Flag className="h-3 w-3" />
-                    Report
+              {/* Icon buttons — always in DOM, never hidden */}
+              <button onClick={handleResetCode} title="Reset code" className="p-1.5 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors flex-shrink-0">
+                <History className="h-4 w-4" />
+              </button>
+
+              <button onClick={handleOpenSettings} title="Settings" className="settings-button p-1.5 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors flex-shrink-0">
+                <Settings className="h-4 w-4" />
+              </button>
+
+              {user && (
+                <button onClick={() => setShowReportModal(true)} title="Report" className="p-1.5 rounded text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors flex-shrink-0">
+                  <Flag className="h-4 w-4" />
+                </button>
+              )}
+
+              <button onClick={toggleCodeEditorMaximized} title="Maximize" className="p-1.5 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors flex-shrink-0">
+                <Maximize2 className="h-4 w-4" />
+              </button>
+
+              {(runResult || submissionResult) && (
+                <button
+                  onClick={() => { setRunResult(null); setSubmissionResult(null); setConsoleOpen(false); }}
+                  title="Clear results"
+                  className="p-1.5 rounded text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors flex-shrink-0"
+                >
+                  <XCircle className="h-4 w-4" />
+                </button>
+              )}
+
+              {/* Spacer */}
+              <div className="flex-1" />
+
+              {/* ── Timer — sits between spacer and Run/Submit ── */}
+              <div className="flex items-center gap-0.5 flex-shrink-0 mr-1">
+                {timerVisible ? (
+                  <>
+                    <span className={`text-xs font-mono font-semibold tabular-nums min-w-[42px] text-center select-none ${
+                      timerRunning ? 'text-orange-500 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'
+                    }`}>
+                      {formatTimer(timerSeconds)}
+                    </span>
+                    <button onClick={() => setTimerRunning(p => !p)} title={timerRunning ? 'Pause' : 'Resume'}
+                      className="p-1 rounded text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors">
+                      {timerRunning
+                        ? <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                        : <svg className="h-3.5 w-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                      }
+                    </button>
+                    <button onClick={handleTimerReset} title="Reset timer"
+                      className="p-1 rounded text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors">
+                      <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                      </svg>
+                    </button>
+                  </>
+                ) : (
+                  <button onClick={handleTimerToggle} title="Start timer"
+                    className="p-1.5 rounded text-gray-500 dark:text-gray-400 hover:text-orange-500 dark:hover:text-orange-400 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] transition-colors">
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" strokeWidth="2"/>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6l4 2"/>
+                    </svg>
                   </button>
                 )}
-
-                {/* Action Buttons */}
-                {(runResult || submissionResult) && (
-                  <button
-                    onClick={() => {
-                      setRunResult(null)
-                      setSubmissionResult(null)
-                    }}
-                    className="px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors text-sm font-medium border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
-                    title="Clear Results"
-                  >
-                    Clear Results
-                  </button>
-                )}
-                <button
-                  onClick={handleResetCode}
-                  className="flex items-center px-3 py-1.5 bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 text-red-700 dark:text-red-200 rounded-lg transition-colors text-sm font-medium border border-transparent dark:border-red-700 hover:border-red-400 dark:hover:border-red-500"
-                  title="Reset code to starting template"
-                >
-                  <History className="h-4 w-4 mr-2" />
-                  Reset
-                </button>
-                <button
-                  onClick={toggleCodeEditorMaximized}
-                  className="flex items-center px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors text-sm font-medium border border-transparent dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500"
-                  title="Maximize Code Editor"
-                >
-                  <Maximize2 className="h-4 w-4 mr-2" />
-                  Maximize
-                </button>
-
-                {/* Settings Dropdown - Now properly positioned relative to its container */}
-                {showSettings && (
-                  <div className="settings-dropdown absolute top-12 right-0 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-lg p-4 z-50 min-w-64">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="font-semibold">Editor Settings</h3>
-                      <button
-                        onClick={handleCloseSettings}
-                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded"
-                        title="Close"
-                      >
-                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                    
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Tab Size</label>
-                        <select
-                          value={tempEditorSettings.tabSize}
-                          onChange={(e) => {
-                            setTempEditorSettings({ ...tempEditorSettings, tabSize: Number(e.target.value) });
-                          }}
-                          className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                        >
-                          <option value={2}>2 spaces</option>
-                          <option value={4}>4 spaces</option>
-                          <option value={8}>8 spaces</option>
-                        </select>
-                      </div>
-                      
-                      <div>
-                        <label className="block text-sm font-medium mb-1">Font Size</label>
-                        <select
-                          value={tempEditorSettings.fontSize}
-                          onChange={(e) => {
-                            setTempEditorSettings({ ...tempEditorSettings, fontSize: Number(e.target.value) });
-                          }}
-                          className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm"
-                        >
-                          <option value={12}>12px</option>
-                          <option value={14}>14px</option>
-                          <option value={16}>16px</option>
-                          <option value={18}>18px</option>
-                        </select>
-                      </div>
-                      
-                      <div className="flex items-center">
-                        <input
-                          type="checkbox"
-                          id="wordWrap"
-                          checked={tempEditorSettings.wordWrap}
-                          onChange={(e) => {
-                            setTempEditorSettings({ ...tempEditorSettings, wordWrap: e.target.checked });
-                          }}
-                          className="mr-2"
-                        />
-                        <label htmlFor="wordWrap" className="text-sm">Word Wrap</label>
-                      </div>
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex items-center justify-end space-x-2 mt-4 pt-3 border-t border-gray-200 dark:border-gray-600">
-                      <button
-                        onClick={handleCloseSettings}
-                        className="px-3 py-1.5 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 text-sm font-medium transition-colors"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        onClick={handleApplySettings}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm font-medium transition-colors"
-                      >
-                        Apply
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
+
+              {/* Thin separator */}
+              <div className="w-px h-5 bg-gray-200 dark:bg-[#3e3e3e] mx-1 flex-shrink-0" />
+
+              {/* Run — always visible, no disabled hiding */}
+              <button
+                onClick={() => { if (!running && token) handleRun(); }}
+                title={!token ? "Login to run" : "Run"}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors flex-shrink-0 ${
+                  !token ? 'opacity-40 cursor-not-allowed text-gray-500 dark:text-gray-400'
+                  : running ? 'text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-[#3e3e3e] cursor-wait'
+                  : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#3e3e3e]'
+                }`}
+              >
+                {running
+                  ? <div className="animate-spin h-3.5 w-3.5 rounded-full border-2 border-gray-400 border-t-transparent flex-shrink-0" />
+                  : <Play className="h-3.5 w-3.5 flex-shrink-0" />
+                }
+                <span>{running ? 'Running...' : 'Run'}</span>
+              </button>
+
+              {/* Submit — always visible, no disabled hiding */}
+              <button
+                onClick={() => { if (!submitting && token) handleSubmit(); }}
+                title={!token ? "Login to submit" : "Submit"}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors flex-shrink-0 ${
+                  !token ? 'opacity-40 cursor-not-allowed bg-green-600 text-white'
+                  : submitting ? 'bg-green-700 text-white cursor-wait'
+                  : 'bg-green-600 hover:bg-green-500 text-white'
+                }`}
+              >
+                {submitting
+                  ? <div className="animate-spin h-3.5 w-3.5 rounded-full border-2 border-white border-t-transparent flex-shrink-0" />
+                  : <Send className="h-3.5 w-3.5 flex-shrink-0" />
+                }
+                <span>{submitting ? 'Submitting...' : 'Submit'}</span>
+              </button>
+
+              {/* Notes button — inline, right of Submit */}
+              <div className="w-px h-5 bg-gray-200 dark:bg-[#3e3e3e] mx-1 flex-shrink-0" />
+              <button
+                onClick={() => setNotesOpen(p => !p)}
+                title="My Notes"
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium transition-colors flex-shrink-0 ${
+                  notesOpen
+                    ? 'bg-yellow-100 dark:bg-yellow-400/10 text-yellow-700 dark:text-yellow-400'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#3e3e3e] hover:text-gray-800 dark:hover:text-gray-200'
+                }`}
+              >
+                <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                <span>Notes</span>
+              </button>
+
             </div>
-            
-            {/* Warnings Section */}
+
+            {/* Settings Dropdown */}
+            {showSettings && (
+              <div className="settings-dropdown absolute top-12 right-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg shadow-xl p-4 z-50 min-w-60">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-sm text-gray-900 dark:text-gray-100">Editor Settings</h3>
+                  <button onClick={handleCloseSettings} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded">
+                    <XCircle className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">Tab Size</label>
+                    <select value={tempEditorSettings.tabSize} onChange={(e) => setTempEditorSettings({ ...tempEditorSettings, tabSize: Number(e.target.value) })}
+                      className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100">
+                      <option value={2}>2 spaces</option><option value={4}>4 spaces</option><option value={8}>8 spaces</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1 text-gray-700 dark:text-gray-300">Font Size</label>
+                    <select value={tempEditorSettings.fontSize} onChange={(e) => setTempEditorSettings({ ...tempEditorSettings, fontSize: Number(e.target.value) })}
+                      className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100">
+                      <option value={12}>12px</option><option value={14}>14px</option><option value={16}>16px</option><option value={18}>18px</option>
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input type="checkbox" id="wordWrap" checked={tempEditorSettings.wordWrap}
+                      onChange={(e) => setTempEditorSettings({ ...tempEditorSettings, wordWrap: e.target.checked })} className="rounded" />
+                    <label htmlFor="wordWrap" className="text-sm text-gray-700 dark:text-gray-300">Word Wrap</label>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-gray-200 dark:border-gray-600">
+                  <button onClick={handleCloseSettings} className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">Cancel</button>
+                  <button onClick={handleApplySettings} className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-sm transition-colors">Apply</button>
+                </div>
+              </div>
+            )}
+
+            {/* Warnings */}
             {tabSwitchCount > 0 && (
-              <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                <p className="text-yellow-800 dark:text-yellow-300 text-sm">
-                  ⚠️ Tab switching detected ({tabSwitchCount} times). This may affect your submission.
-                </p>
+              <div className="mx-2 mb-1 px-3 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded text-xs text-yellow-800 dark:text-yellow-300">
+                ⚠️ Tab switching detected ({tabSwitchCount} times).
               </div>
             )}
             {selectedSubmission && (
-              <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                <p className="text-blue-800 dark:text-blue-300 text-sm">
-                  📝 Viewing code from submission: {selectedSubmission.status} (
-                  {new Date(selectedSubmission.date).toLocaleDateString()})
-                </p>
+              <div className="mx-2 mb-1 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-xs text-blue-800 dark:text-blue-300">
+                📝 Viewing: {selectedSubmission.status} ({new Date(selectedSubmission.date).toLocaleDateString()})
               </div>
             )}
           </div>
 
-          {/* Code Editor */}
-          <div className="flex-1 relative p-4">
-            <div className="absolute inset-4 border border-gray-300 dark:border-gray-700 rounded-lg overflow-hidden shadow-inner">
-              <CodeMirrorEditor
-                value={code}
-                onChange={setCode}
-                language={language}
-                disabled={false}
-                settings={editorSettings} // Pass settings
-                className="h-full w-full"
-                height="100%"
-                onGoToBottom={scrollToBottom}
-                token={token || undefined}
-              />
-            </div>
-          </div>
+          {/* Editor + Console sub-container — flex-1 so toolbar is NEVER clipped */}
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
-          {/* Console Output Component - Below code editor */}
-          <div className="flex-shrink-0 border-t border-gray-200 dark:border-gray-750 bg-gray-50 dark:bg-gray-900">
-            <ConsoleOutput 
-              ref={consoleOutputRef}
-              publicTestCases={problem?.testCases?.filter((tc: any) => tc.isPublic) || []}
-              runResult={runResult}
-              submissionResult={submissionResult}
-              running={running}
-              submitting={submitting}
+          {/* Code Editor — seamless */}
+          <div className="flex-1 min-h-0 bg-white dark:bg-[#1e1e1e]">
+            <CodeMirrorEditor
+              value={code}
+              onChange={setCode}
+              language={language}
+              disabled={false}
+              settings={editorSettings}
+              className="h-full w-full"
+              height="100%"
+              onGoToBottom={scrollToBottom}
+              token={token || undefined}
             />
           </div>
 
-          {/* Floating Buttons Container */}
+          {/* ── Notes Panel — slides in above console when open ── */}
+          {notesOpen && (
+            <div className="flex-shrink-0 border-t border-gray-200 dark:border-[#3e3e3e] bg-white dark:bg-[#1e1e1e]" style={{ height: '220px' }}>
+              <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-[#3e3e3e]">
+                <div className="flex items-center gap-2">
+                  <svg className="h-3.5 w-3.5 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">Notes</span>
+                  {notes.length > 0 && (
+                    <span className="text-xs text-gray-400 dark:text-gray-600">{notes.length} chars</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => {
+                    setNotes("");
+                    localStorage.removeItem(`notes_${problem?._id}`);
+                  }}
+                  className="text-xs text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-[#3e3e3e]"
+                >
+                  Clear
+                </button>
+              </div>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Write your approach, edge cases, pseudocode..."
+                className="w-full h-[calc(100%-36px)] resize-none bg-transparent text-xs text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-600 p-3 focus:outline-none font-mono leading-relaxed"
+                spellCheck={false}
+              />
+            </div>
+          )}
+
+          {/* ── LeetCode-style Console ── */}
+          <div className="flex-shrink-0 border-t border-gray-200 dark:border-[#3e3e3e] bg-white dark:bg-[#1e1e1e]" style={{ height: consoleOpen ? '260px' : 'auto' }}>
+            {/* Console top bar — always visible, click to toggle */}
+            <div className="flex items-center border-b border-gray-200 dark:border-[#3e3e3e] select-none">
+              {/* Testcase tab */}
+              <button
+                onClick={() => { setConsoleTab('testcase'); setConsoleOpen(true); }}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                  consoleOpen && consoleTab === 'testcase'
+                    ? 'border-gray-800 dark:border-white text-gray-800 dark:text-white'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                }`}
+              >
+                <CheckCircle className="h-3.5 w-3.5" />
+                Testcase
+              </button>
+              {/* Test Result tab */}
+              <button
+                onClick={() => { setConsoleTab('result'); setConsoleOpen(true); }}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                  consoleOpen && consoleTab === 'result'
+                    ? 'border-gray-800 dark:border-white text-gray-800 dark:text-white'
+                    : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                }`}
+              >
+                <Code className="h-3.5 w-3.5" />
+                Test Result
+                {(running || submitting) && (
+                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-blue-500 border-t-transparent ml-1" />
+                )}
+              </button>
+
+              <div className="flex-1" />
+
+              {/* Toggle chevron */}
+              <button
+                onClick={() => setConsoleOpen(p => !p)}
+                className="px-3 py-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+              >
+                <svg className={`h-4 w-4 transition-transform duration-200 ${consoleOpen ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Console body */}
+            {consoleOpen && (
+              <div ref={consoleOutputRef} className="h-full overflow-y-auto pb-2">
+
+                {/* ── TESTCASE TAB ── */}
+                {consoleTab === 'testcase' && (
+                  <div className="p-3">
+                    {/* Case tabs */}
+                    <div className="flex gap-2 mb-3">
+                      {(problem?.testCases?.filter((tc: { input: string; output: string; isPublic: boolean }) => tc.isPublic) || []).map((_: any, idx: number) => (
+                        <button
+                          key={idx}
+                          onClick={() => setConsoleTestCaseIdx(idx)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                            consoleTestCaseIdx === idx
+                              ? 'bg-gray-200 dark:bg-[#3e3e3e] text-gray-900 dark:text-white'
+                              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#2d2d2d]'
+                          }`}
+                        >
+                          Case {idx + 1}
+                        </button>
+                      ))}
+                    </div>
+                    {/* Selected test case input */}
+                    {(() => {
+                      const tc = (problem?.testCases?.filter((tc: { input: string; output: string; isPublic: boolean }) => tc.isPublic) || [])[consoleTestCaseIdx];
+                      if (!tc) return null;
+                      return (
+                        <div className="space-y-3">
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Input</p>
+                            <div className="bg-gray-100 dark:bg-[#2d2d2d] rounded-lg px-3 py-2">
+                              <pre className="text-xs font-mono text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{tc.input}</pre>
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Expected Output</p>
+                            <div className="bg-gray-100 dark:bg-[#2d2d2d] rounded-lg px-3 py-2">
+                              <pre className="text-xs font-mono text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{tc.output}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* ── RESULT TAB ── */}
+                {consoleTab === 'result' && (
+                  <div className="p-3">
+                    {/* Loading */}
+                    {(running || submitting) && (
+                      <div className="flex items-center gap-3 py-4">
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-500 border-t-transparent flex-shrink-0" />
+                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                          {running ? 'Running your code...' : 'Submitting your solution...'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Run Result */}
+                    {runResult && !submissionResult && !running && (
+                      <div className="space-y-3">
+                        {/* Status */}
+                        <div>
+                          <span className={`text-xl font-bold ${
+                            runResult.status === 'Accepted' || runResult.status === 'Success'
+                              ? 'text-green-500' : 'text-red-500'
+                          }`}>
+                            {runResult.status === 'Success' ? 'Accepted' : runResult.status}
+                          </span>
+                          {(runResult.status === 'Accepted' || runResult.status === 'Success') && (
+                            <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">
+                              Runtime: {runResult.executionTime || 0} ms
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Case tabs */}
+                        {runResult.testResults && runResult.testResults.length > 0 && (
+                          <>
+                            <div className="flex gap-2">
+                              {runResult.testResults.map((r, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => setConsoleTestCaseIdx(idx)}
+                                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                                    consoleTestCaseIdx === idx
+                                      ? 'bg-gray-200 dark:bg-[#3e3e3e] text-gray-900 dark:text-white'
+                                      : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-[#2d2d2d]'
+                                  }`}
+                                >
+                                  {r.passed
+                                    ? <CheckCircle className="h-3 w-3 text-green-500" />
+                                    : <XCircle className="h-3 w-3 text-red-500" />
+                                  }
+                                  Case {idx + 1}
+                                </button>
+                              ))}
+                            </div>
+
+                            {/* Selected case details */}
+                            {runResult.testResults[consoleTestCaseIdx] && (
+                              <div className="space-y-2">
+                                {[
+                                  { label: 'Input', value: runResult.testResults[consoleTestCaseIdx].input },
+                                  { label: 'Output', value: runResult.testResults[consoleTestCaseIdx].actualOutput },
+                                  { label: 'Expected', value: runResult.testResults[consoleTestCaseIdx].expectedOutput },
+                                ].map(({ label, value }) => (
+                                  <div key={label}>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{label}</p>
+                                    <div className="bg-gray-100 dark:bg-[#2d2d2d] rounded-lg px-3 py-2">
+                                      <pre className="text-xs font-mono text-gray-900 dark:text-gray-100 whitespace-pre-wrap">{value || '—'}</pre>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* Error */}
+                        {runResult.error && (
+                          <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
+                            <pre className="text-xs font-mono text-red-600 dark:text-red-300 whitespace-pre-wrap">{runResult.error}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Submission Result */}
+                    {submissionResult && !submitting && (
+                      <div className="space-y-3">
+                        {/* Status */}
+                        <div>
+                          <span className={`text-xl font-bold ${
+                            submissionResult.status === 'Accepted' ? 'text-green-500' : 'text-red-500'
+                          }`}>
+                            {submissionResult.status}
+                          </span>
+                          {submissionResult.status === 'Accepted' && (
+                            <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">
+                              Runtime: {submissionResult.executionTime || 0} ms
+                              {submissionResult.memory ? ` · Memory: ${submissionResult.memory} MB` : ''}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Passed count */}
+                        {submissionResult.passedTests !== undefined && (
+                          <p className="text-sm text-gray-600 dark:text-gray-400">
+                            {submissionResult.passedTests}/{submissionResult.totalTests} test cases passed
+                          </p>
+                        )}
+
+                        {/* POTD coins */}
+                        {submissionResult.potd?.awarded && (
+                          <div className="flex items-center gap-2 px-3 py-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                            <span className="text-lg">🪙</span>
+                            <span className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                              +{submissionResult.potd.coinsEarned} coins earned!
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Error */}
+                        {submissionResult.error && (
+                          <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
+                            <pre className="text-xs font-mono text-red-600 dark:text-red-300 whitespace-pre-wrap">{submissionResult.error}</pre>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Empty state */}
+                    {!runResult && !submissionResult && !running && !submitting && (
+                      <div className="flex flex-col items-center justify-center py-6 text-gray-400 dark:text-gray-500">
+                        <Code className="h-8 w-8 mb-2 opacity-40" />
+                        <p className="text-sm">Run your code to see results here</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          </div>
+          {/* END editor+console sub-container */}
+
+          {/* Floating Buttons — visible on ALL screen sizes */}
           <div className="fixed bottom-4 md:bottom-8 right-4 md:right-8 z-40 flex flex-col space-y-2 md:space-y-4">
-            {/* DSA Visualizer Learning Button */}
             <button
               onClick={handleDsaVisualizerClick}
-              className="p-3 md:p-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-emerald-500 focus:ring-opacity-75 animate-bounce-slow"
+              className="p-3 md:p-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-emerald-500 focus:ring-opacity-75"
               title="DSA Visualizer Learning"
-              style={{ width: '78px', height: '78px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <GraduationCap className="h-8 md:h-10 w-8 md:w-10" />
+              <GraduationCap className="h-7 w-7" />
             </button>
 
-            {/* Analyse Time and Space Complexity Button */}
             <button
               onClick={toggleComplexityAiMaximized}
-              className="p-3 md:p-4 bg-orange-600 hover:bg-orange-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-orange-500 focus:ring-opacity-75 animate-bounce-slow"
-              title="Analyse Time and Space Complexity of Current Code"
-              style={{ width: '78px', height: '78px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              className="p-3 md:p-4 bg-orange-600 hover:bg-orange-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-orange-500 focus:ring-opacity-75"
+              title="Analyse Time and Space Complexity"
+              style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <Zap className="h-8 md:h-10 w-8 md:w-10" />
+              <Zap className="h-7 w-7" />
             </button>
 
-            {/* Existing Floating AI Chat Button */}
             <button
               onClick={toggleAiMaximized}
-              className="p-3 md:p-4 bg-purple-600 hover:bg-purple-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-purple-500 focus:ring-opacity-75 animate-bounce-slow"
+              className="p-3 md:p-4 bg-purple-600 hover:bg-purple-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all duration-300 focus:outline-none focus:ring-4 focus:ring-purple-500 focus:ring-opacity-75"
               title="Open AI Chat"
-              style={{ width: '78px', height: '78px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              style={{ width: '56px', height: '56px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
             >
-              <Bot className="h-8 md:h-10 w-8 md:w-10" />
+              <Bot className="h-7 w-7" />
             </button>
           </div>
         </div>
+        {/* ── END RIGHT PANEL ────────────────────────────────── */}
+
       </div>
+      {/* END main flex row */}
 
       {/* Result Card Overlay */}
       {showResultCard && resultCardData && (
         <div className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-50">
           <div className={`relative max-w-lg w-full mx-4 transform transition-all duration-500 scale-100 ${
-            resultCardData.type === 'success' 
-              ? 'bg-gradient-to-br from-green-50 via-emerald-50 to-green-100 border-green-300 dark:from-green-900/30 dark:via-emerald-900/20 dark:to-green-800/30 dark:border-green-600' 
+            resultCardData.type === 'success'
+              ? 'bg-gradient-to-br from-green-50 via-emerald-50 to-green-100 border-green-300 dark:from-green-900/30 dark:via-emerald-900/20 dark:to-green-800/30 dark:border-green-600'
               : 'bg-gradient-to-br from-red-50 via-rose-50 to-red-100 border-red-300 dark:from-red-900/30 dark:via-rose-900/20 dark:to-red-800/30 dark:border-red-600'
           } border-2 rounded-2xl shadow-2xl overflow-hidden`}>
-            
-            {/* Premium Background Pattern */}
+
             <div className="absolute inset-0 opacity-10">
               <div className={`absolute top-0 right-0 w-32 h-32 rounded-full ${
                 resultCardData.type === 'success' ? 'bg-green-400' : 'bg-red-400'
@@ -2751,23 +2802,18 @@ useEffect(() => {
               } blur-2xl transform -translate-x-12 translate-y-12`}></div>
             </div>
 
-            {/* Close Button */}
-            <button 
-              onClick={() => {
-                setShowResultCard(false)
-                setResultCardData(null)
-              }}
+            <button
+              onClick={() => { setShowResultCard(false); setResultCardData(null); }}
               className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-full bg-white/20 hover:bg-white/30 transition-colors text-gray-600 dark:text-gray-300"
             >
               <XCircle className="w-5 h-5" />
             </button>
 
             <div className="relative p-8 text-center">
-              {/* Success/Failure Icon with Animation */}
               <div className="relative mb-6">
                 <div className={`inline-flex items-center justify-center w-20 h-20 rounded-full ${
-                  resultCardData.type === 'success' 
-                    ? 'bg-green-100 border-4 border-green-300 dark:bg-green-800/50 dark:border-green-500' 
+                  resultCardData.type === 'success'
+                    ? 'bg-green-100 border-4 border-green-300 dark:bg-green-800/50 dark:border-green-500'
                     : 'bg-red-100 border-4 border-red-300 dark:bg-red-800/50 dark:border-red-500'
                 } animate-pulse`}>
                   {resultCardData.type === 'success' ? (
@@ -2778,28 +2824,25 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* Title with Gradient Text */}
               <h2 className={`text-3xl font-bold mb-3 bg-gradient-to-r ${
-                resultCardData.type === 'success' 
-                  ? 'from-green-600 to-emerald-600 dark:from-green-400 dark:to-emerald-400' 
+                resultCardData.type === 'success'
+                  ? 'from-green-600 to-emerald-600 dark:from-green-400 dark:to-emerald-400'
                   : 'from-red-600 to-rose-600 dark:from-red-400 dark:to-rose-400'
               } bg-clip-text text-transparent`}>
                 {resultCardData.title}
               </h2>
 
-              {/* Message */}
               <p className={`text-lg mb-6 ${
-                resultCardData.type === 'success' 
-                  ? 'text-green-700 dark:text-green-200' 
+                resultCardData.type === 'success'
+                  ? 'text-green-700 dark:text-green-200'
                   : 'text-red-700 dark:text-red-200'
               }`}>
                 {resultCardData.message}
               </p>
-              
-              {/* Test Cases Card */}
-              <div className={`inline-flex items-center px-6 py-3 rounded-xl mb-6 ${
-                resultCardData.type === 'success' 
-                  ? 'bg-green-200/50 border border-green-300 text-green-800 dark:bg-green-800/30 dark:border-green-600 dark:text-green-200' 
+
+              <div className={`inline-flex items-center px-6 py-3 rounded-xl mb-4 ${
+                resultCardData.type === 'success'
+                  ? 'bg-green-200/50 border border-green-300 text-green-800 dark:bg-green-800/30 dark:border-green-600 dark:text-green-200'
                   : 'bg-red-200/50 border border-red-300 text-red-800 dark:bg-red-800/30 dark:border-red-600 dark:text-red-200'
               } backdrop-blur-sm`}>
                 <div className={`w-3 h-3 rounded-full mr-3 ${
@@ -2810,13 +2853,36 @@ useEffect(() => {
                 </span>
               </div>
 
-              {/* Performance Stats */}
+              {/* ✅ Timer solve time — shown only on success with timer active */}
+              {resultCardData.type === 'success' && resultCardData.solveTime !== undefined && (
+                <div className="mb-4 mx-auto w-fit">
+                  <div className="flex items-center gap-3 px-6 py-3 bg-orange-50 dark:bg-orange-400/10 border border-orange-200 dark:border-orange-400/30 rounded-xl">
+                    <svg className="h-5 w-5 text-orange-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <circle cx="12" cy="12" r="10" strokeWidth="2"/>
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6l4 2"/>
+                    </svg>
+                    <div className="text-left">
+                      <p className="text-xs text-orange-600 dark:text-orange-400 font-medium">Solved in</p>
+                      <p className="text-xl font-bold font-mono text-orange-700 dark:text-orange-300 tabular-nums">
+                        {formatTimer(resultCardData.solveTime)}
+                      </p>
+                    </div>
+                    {bestSolveTime !== null && bestSolveTime === resultCardData.solveTime && (
+                      <div className="ml-2 flex flex-col items-center">
+                        <span className="text-lg">🏆</span>
+                        <span className="text-xs font-semibold text-yellow-600 dark:text-yellow-400">Best!</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {(resultCardData.executionTime !== undefined || resultCardData.memory !== undefined) && (
                 <div className="flex justify-center space-x-4 mb-6">
                   {resultCardData.executionTime !== undefined && (
                     <div className={`px-4 py-2 rounded-lg ${
-                      resultCardData.type === 'success' 
-                        ? 'bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200' 
+                      resultCardData.type === 'success'
+                        ? 'bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200'
                         : 'bg-red-100 dark:bg-red-800/30 text-red-800 dark:text-red-200'
                     }`}>
                       <div className="text-sm font-medium">Runtime</div>
@@ -2825,8 +2891,8 @@ useEffect(() => {
                   )}
                   {resultCardData.memory !== undefined && (
                     <div className={`px-4 py-2 rounded-lg ${
-                      resultCardData.type === 'success' 
-                        ? 'bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200' 
+                      resultCardData.type === 'success'
+                        ? 'bg-green-100 dark:bg-green-800/30 text-green-800 dark:text-green-200'
                         : 'bg-red-100 dark:bg-red-800/30 text-red-800 dark:text-red-200'
                     }`}>
                       <div className="text-sm font-medium">Memory</div>
@@ -2836,7 +2902,6 @@ useEffect(() => {
                 </div>
               )}
 
-              {/* Coins Earned for Success */}
               {resultCardData.type === 'success' && resultCardData.coinsEarned && (
                 <div className="mb-6 p-4 bg-gradient-to-r from-yellow-100 to-amber-100 dark:from-yellow-900/30 dark:to-amber-900/30 rounded-xl border border-yellow-300 dark:border-yellow-600">
                   <div className="flex items-center justify-center space-x-2">
@@ -2850,15 +2915,11 @@ useEffect(() => {
                 </div>
               )}
 
-              {/* Action Buttons */}
               <div className="flex space-x-4 justify-center">
                 {resultCardData.type === 'failure' ? (
                   <>
                     <button
-                      onClick={() => {
-                        setShowResultCard(false)
-                        setResultCardData(null)
-                      }}
+                      onClick={() => { setShowResultCard(false); setResultCardData(null); }}
                       className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-6 py-3 rounded-lg font-medium shadow-lg transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50"
                     >
                       <Code className="w-4 h-4 mr-2 inline" />
@@ -2881,10 +2942,7 @@ useEffect(() => {
                       Solve More Problems
                     </button>
                     <button
-                      onClick={() => {
-                        setShowResultCard(false)
-                        setResultCardData(null)
-                      }}
+                      onClick={() => { setShowResultCard(false); setResultCardData(null); }}
                       className="flex-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 px-6 py-3 rounded-lg font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-gray-500 focus:ring-opacity-50"
                     >
                       Continue Coding
@@ -2908,6 +2966,7 @@ useEffect(() => {
           targetUrl={`/problems/${problem._id}`}
         />
       )}
+
     </div>
   )
 }
